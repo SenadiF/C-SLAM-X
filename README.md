@@ -57,6 +57,8 @@ identical fault injection scenarios (WiFi loss, coordinator loss), measuring:
 - Data loss during outages
 - Recovery time on reconnect
 - Map size before/after quadtree compression
+- Memory(grid) vs Memory(quadtree) comparison 
+- Time(grid update) vs Time(quadtree update) comparison
 - Exploration coverage over time
 
 ## Acknowledgments

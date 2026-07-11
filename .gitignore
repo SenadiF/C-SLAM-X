@@ -1,0 +1,51 @@
+# ROS 2 build files
+build/
+install/
+log/
+
+# Colcon generated files
+.colcon/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Python virtual environments
+venv/
+.venv/
+
+# ROS 2 package generated files
+*.egg-info/
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Logs
+*.log
+
+*.bag
+*.db3
+
+# Large binaries
+*.bin
+*.hex
+*.elf
+
+# Micro-ROS generated build files
+firmware/build/

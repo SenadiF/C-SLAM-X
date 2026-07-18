@@ -1,0 +1,45 @@
+ESP32 publishes - left ticks and right ticks 
+
+Encodder is conncted to the motor side
+Wheel is connected to the output shaft 
+
+Internal motor - 1500 RPM
+Output Shaft- 300RPM
+
+Gear ratio = Motor speed / output speed 
+           =1500RPM/300RPM
+           =50:1
+
+encode-> 7 pulses per motor revolution 
+
+Encoder wheel = 7 * 50 
+              =350 pulses per wheel revolution
+
+Diameter = 32mm = 0.032m 
+
+Radius = 0.016m
+
+one wheel rotation travels = 2 * pi * r 
+                           = 0.1005m
+
+350 ticks = one revolution
+
+ditance per tick = 0.1005/350= 0.000287m
+
+
+Differential drive :
+
+Average movement= D= (D right + D left)/2
+
+rotation delta theta= (D right- D left )/ wheel base 
+ 
+wheel base = 0.099m 
+
+Robot pose is (x,y,theta)
+
+delta x= D cos(theta + delta theta/2)
+delta y= D sin(theta + delta theta/2)
+
+x=x+delta theta 
+y=y+deta theta 
+theta=  theta + delta theta

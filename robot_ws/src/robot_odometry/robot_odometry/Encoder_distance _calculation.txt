@@ -43,3 +43,6 @@ delta y= D sin(theta + delta theta/2)
 x=x+delta theta 
 y=y+deta theta 
 theta=  theta + delta theta
+
+
+covariance - 36 element array , represents uncertainty between the values 

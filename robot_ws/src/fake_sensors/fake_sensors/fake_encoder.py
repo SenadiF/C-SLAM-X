@@ -53,8 +53,9 @@ class FakeEncoder(Node):
 
         # Simulate forward motion
         # both wheels rotate equally
-        self.left_ticks += 10
-        self.right_ticks += 10
+        #Changed to check EKF
+        self.left_ticks += 9
+        self.right_ticks += 11
 
 
         msg.left_ticks = self.left_ticks

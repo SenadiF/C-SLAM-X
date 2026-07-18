@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': ['fake_encoder = fake_sensors.fake_encoder:main',
+                            'fake_imu = fake_sensors.fake_imu:main',
         ],
     },
 )

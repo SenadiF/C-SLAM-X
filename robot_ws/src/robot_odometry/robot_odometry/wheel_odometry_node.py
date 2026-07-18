@@ -3,14 +3,14 @@ from rclpy.node import Node
 from robot_interfaces.msg import Encoder
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion
-from builtin_interfaces.msg import Time
+
 import math
 from tf_transformations import quaternion_from_euler
 
 class WheelOdometryNode(Node):
 
-    def _init_(self):
-        super()._init_('wheel_odometry_node')
+    def __init__(self):
+        super().__init__('wheel_odometry_node')
 
         
 
@@ -51,8 +51,62 @@ class WheelOdometryNode(Node):
 
         current_left_ticks = msg.left_ticks
         current_right_ticks = msg.right_ticks   
+          
+        left_tick_diff = current_left_ticks - self.prev_left_ticks
+        right_tick_diff = current_right_ticks - self.prev_right_ticks
 
-        delta_left=(current_left_ticks - self.prev_left_ticks) * (2 * math.pi * self.wheel_radius) / self.ticks_per_revolution
-        delta_right=(current_right_ticks - self.prev_right_ticks) * (2 * math.pi * self.wheel_radius) / self.ticks_per_revolution   
-  
-        
+        distance_per_tick = 2 * math.pi * self.wheel_radius / self.ticks_per_revolution
+
+        left_distance = left_tick_diff * distance_per_tick
+        right_distance = right_tick_diff * distance_per_tick
+
+        distance = (left_distance + right_distance) / 2.0
+        delta_theta = (right_distance - left_distance) / self.wheel_base
+
+        self.x += distance * math.cos(self.theta + delta_theta / 2.0)
+        self.y += distance * math.sin(self.theta + delta_theta / 2.0)
+        self.theta += delta_theta
+
+        self.prev_left_ticks = current_left_ticks
+        self.prev_right_ticks = current_right_ticks 
+
+        self.publish_odometry()
+
+    def publish_odometry(self):
+
+            msg=Odometry()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = (
+            f'{self.robot_name}/odom'
+        )
+
+            msg.child_frame_id = (
+            f'{self.robot_name}/base_link'
+        )
+            #Pose
+            msg.pose.pose.position.x = self.x
+            msg.pose.pose.position.y = self.y
+            msg.pose.pose.position.z = 0.0  
+
+            q=quaternion_from_euler(0.0, 0.0, self.theta)
+            msg.pose.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+
+
+            self.odom_publisher.publish(msg)
+
+def main(args=None):
+
+          rclpy.init(args=args)
+
+          node = WheelOdometryNode()
+
+          rclpy.spin(node)
+
+          node.destroy_node()
+
+          rclpy.shutdown()
+
+
+
+if __name__ == '__main__':
+             main()

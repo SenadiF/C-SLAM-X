@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
 
   auto lidar_packet_sub =
     node->create_subscription<robot_interfaces::msg::LidarPacket>(
-    "/lidar_packet",
+      "lidar_packet",
     10,
     [&](const robot_interfaces::msg::LidarPacket::SharedPtr msg)
     {

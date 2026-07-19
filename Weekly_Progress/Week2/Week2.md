@@ -27,4 +27,5 @@ The screenshots of the pipeline tests are attached below:
 ![Verified the whole pipeline for 2 robots ](./Week2_7.png) 
 
 
+- Modified the lidar existing package to fit with the system architecture pipeline .
 

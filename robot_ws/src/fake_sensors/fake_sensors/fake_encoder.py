@@ -8,6 +8,7 @@ class FakeEncoder(Node):
 
     def __init__(self):
         super().__init__('fake_encoder_node')
+        
 
         # Robot name parameter
         self.declare_parameter('robot_name', 'robot1')

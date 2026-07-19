@@ -31,21 +31,13 @@ def generate_launch_description():
     package='robot_localization',
     executable='ekf_node',
     namespace=namespace,
-    parameters=[ekf_config],
-    remappings=[
-        ('wheel_odom', 'wheel_odom'),
-        ('imu', 'imu')
+    parameters=[
+        ekf_config,
+        {
+            'tf_prefix': namespace
+        }
     ]
-)
-
-
-        
-        
-        
-        
-        
-        
-        
+)  
         
 
     ])

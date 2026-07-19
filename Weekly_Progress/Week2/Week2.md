@@ -20,8 +20,8 @@ The screenshots of the pipeline tests are attached below:
 ![Checked the wheel odometry for 2 robots](./Week2_4.png) 
 
 - Added the fake imu sensor readings and checked the output from the robot localization package(Fileterd odometry output)
-[Added the fake imu sensor readings and checked the output from the robot localization package](./Week2_5.png)
-[Added the fake imu sensor readings and checked the output from the robot localization package](./Week2_6.png)
+![Added the fake imu sensor readings and checked the output from the robot localization package](./Week2_5.png)
+![Added the fake imu sensor readings and checked the output from the robot localization package](./Week2_6.png)
 
 - Verified the whole pipeline for 2 robots 
 ![Verified the whole pipeline for 2 robots ](./Week2_7.png) 

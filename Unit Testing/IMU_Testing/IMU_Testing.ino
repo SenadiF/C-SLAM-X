@@ -12,16 +12,10 @@ void setup()
   Serial.println("BMI160 Test");
 
 
-  if (bmi160.softReset() != BMI160_OK)
+  
+  if (bmi160.I2cInit(0x69) != BMI160_OK)
   {
-    Serial.println("Reset failed");
-    while(1);
-  }
-
-
-  if (bmi160.I2cInit() != BMI160_OK)
-  {
-    Serial.println("BMI160 not found!");
+    Serial.println("BMI160 init failed");
     while(1);
   }
 

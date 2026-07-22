@@ -1,0 +1,11 @@
+robot_ws
+└── src
+    ├── robot_interfaces        ← Custom messages
+    ├── sensor_simulator        ← encoder/IMU/LiDAR
+    ├── robot_control           ← Motion control
+    ├── robot_bringup           ← Launch files
+    ├── robot_localization      ← EKF configuration
+    ├── map_merge               ← Merge maps
+    ├── frontier_exploration    ← Exploration algorithm
+    ├── fault_detection         ← Robot health monitoring
+    └── communication           ← communication

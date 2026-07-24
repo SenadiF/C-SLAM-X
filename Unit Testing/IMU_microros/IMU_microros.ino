@@ -7,6 +7,7 @@
 #include <rclc/executor.h>
 #include <robot_interfaces/msg/encoder.h>
 #include <sensor_msgs/msg/imu.h>
+<<<<<<< HEAD
 #include <geometry_msgs/msg/twist.h>   
 
 #include <rosidl_runtime_c/string_functions.h>
@@ -64,6 +65,10 @@ rcl_node_t node;
 rcl_publisher_t imu_publisher;
 sensor_msgs__msg__Imu imu_msg;
 
+
+rcl_subscription_t cmd_vel_subscriber;
+rclc_executor_t executor;
+geometry_msgs__msg__Twist cmd_vel_msg;
 
 rcl_subscription_t cmd_vel_subscriber;
 rclc_executor_t executor;

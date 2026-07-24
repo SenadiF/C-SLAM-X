@@ -7,7 +7,11 @@
 #include <rclc/executor.h>
 #include <robot_interfaces/msg/encoder.h>
 #include <sensor_msgs/msg/imu.h>
+<<<<<<< HEAD
 #include <geometry_msgs/msg/twist.h>   
+=======
+#include <geometry_msgs/msg/twist.h>   // NEW — needed for cmd_vel message type
+>>>>>>> 9808d4a65353e6640fe16f90c7d59ee5127b9e79
 
 #include <rosidl_runtime_c/string_functions.h>
 volatile long left_ticks = 0;
@@ -64,6 +68,10 @@ rcl_node_t node;
 rcl_publisher_t imu_publisher;
 sensor_msgs__msg__Imu imu_msg;
 
+// NEW — for receiving cmd_vel
+rcl_subscription_t cmd_vel_subscriber;
+rclc_executor_t executor;
+geometry_msgs__msg__Twist cmd_vel_msg;
 
 rcl_subscription_t cmd_vel_subscriber;
 rclc_executor_t executor;

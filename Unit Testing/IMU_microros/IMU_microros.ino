@@ -13,6 +13,23 @@
 
 std_msgs__msg__Int32MultiArray encoder_msg;
 
+// Variables for P controller 
+unsigned long last_cmd_vel_time=0;
+const unsigned long CMD_VEL_TIMEOUT_MS =500;
+long prev_left_ticks =0;
+long prev_right_ticks =0;
+unsigned long last_pid_time=0;
+const unsigned long PID_PERIOD_MS=50;
+
+float target_left_speed= 0.0;
+float target_right_speed=0.0;
+
+const float KP=50.0;
+//dummy value to be removed after calibrating correctly 
+const float TICKS_PER_METER=3480.0 ;
+
+
+
 #include <rosidl_runtime_c/string_functions.h>
 volatile long left_ticks = 0;
 volatile long right_ticks = 0;
@@ -139,6 +156,8 @@ void driveMotor(int pinForward, int pinBackward, float speed, bool reversed) {
 
 void cmd_vel_callback(const void *msgin) {
   const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
+  last_cmd_vel_time= millis();
+  
   float linear = msg->linear.x;
   float angular = msg->angular.z;
 
@@ -148,17 +167,17 @@ void cmd_vel_callback(const void *msgin) {
   Serial.print(" Angular: ");
   Serial.println(angular);
 
-  float left_speed  = linear - (angular * WHEEL_BASE_M / 2.0);
-  float right_speed = linear + (angular * WHEEL_BASE_M / 2.0);
+  target_left_speed  = linear - (angular * WHEEL_BASE_M / 2.0);
+  target_right_speed = linear + (angular * WHEEL_BASE_M / 2.0);
 
-  Serial.print("left_speed: ");
-  Serial.println(left_speed);
+  Serial.print("target_left_speed: ");
+  Serial.println(target_left_speed);
 
-  Serial.print("right_speed: ");
-  Serial.println(right_speed);
+  Serial.print("target_right_speed: ");
+  Serial.println(target_right_speed);
 
-  driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_speed, LEFT_MOTOR_REVERSED);
-  driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_speed, RIGHT_MOTOR_REVERSED);
+  
+  
 }
 
 void setupMotors() {
@@ -169,7 +188,30 @@ void setupMotors() {
 
   stopMotors();
 }
+void updateMotorPID() {
+  if (millis() - last_pid_time < PID_PERIOD_MS) return;
+  float dt = (millis() - last_pid_time) / 1000.0;
+  last_pid_time = millis();
 
+  // Safety watchdog
+  if (millis() - last_cmd_vel_time > CMD_VEL_TIMEOUT_MS) {
+    stopMotors();
+    return;
+  }
+
+  // Actual speed from encoder ticks this cycle
+  float actual_left  = (left_ticks - prev_left_ticks) / TICKS_PER_METER / dt;
+  float actual_right = (right_ticks - prev_right_ticks) / TICKS_PER_METER / dt;
+  prev_left_ticks = left_ticks;
+  prev_right_ticks = right_ticks;
+
+  // proportional correction
+  float left_output  = target_left_speed  + KP * (target_left_speed - actual_left) * dt;
+  float right_output = target_right_speed + KP * (target_right_speed - actual_right) * dt;
+
+  driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_output, LEFT_MOTOR_REVERSED);
+  driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_output, RIGHT_MOTOR_REVERSED);
+}
 void setup()
 {
     Serial.begin(115200);
@@ -232,8 +274,8 @@ void setup()
 
 void loop()
 {
-    // Spin the executor to handle incoming messages
     rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+    updateMotorPID();  
 
     unsigned long current_time = millis();
     if (current_time - last_publish_time >= PUBLISH_PERIOD_MS) {

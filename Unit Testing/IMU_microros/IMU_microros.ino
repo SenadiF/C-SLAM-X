@@ -74,6 +74,10 @@ rcl_subscription_t cmd_vel_subscriber;
 rclc_executor_t executor;
 geometry_msgs__msg__Twist cmd_vel_msg;
 
+rcl_subscription_t cmd_vel_subscriber;
+rclc_executor_t executor;
+geometry_msgs__msg__Twist cmd_vel_msg;
+
 const uint32_t PUBLISH_PERIOD_MS = 10;
 unsigned long last_publish_time = 0;
 

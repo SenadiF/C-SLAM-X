@@ -35,10 +35,10 @@ void stopMotors() {
 }
 
 void driveForward() {
-  digitalWrite(LEFT_MOTOR_IN1, HIGH);
-  digitalWrite(LEFT_MOTOR_IN2, LOW);
-  digitalWrite(RIGHT_MOTOR_IN1, HIGH);
-  digitalWrite(RIGHT_MOTOR_IN2, LOW);
+  digitalWrite(LEFT_MOTOR_IN1, LOW);
+  digitalWrite(LEFT_MOTOR_IN2, HIGH);
+  digitalWrite(RIGHT_MOTOR_IN1, LOW);
+  digitalWrite(RIGHT_MOTOR_IN2, HIGH);
 }
 
 void setup() {

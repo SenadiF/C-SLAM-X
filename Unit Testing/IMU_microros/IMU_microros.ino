@@ -147,7 +147,7 @@ void setup()
     Serial.println("Encoders Initialized");
 
     setupMotors();
-    Serial.println("Motor pins Intilialized")
+    Serial.println("Motor pins Intilialized");
 }
 
 void loop()

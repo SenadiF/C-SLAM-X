@@ -5,18 +5,20 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
-#include <robot_interfaces/msg/encoder.h>
+
 #include <sensor_msgs/msg/imu.h>
 
 #include <geometry_msgs/msg/twist.h>   
+#include <std_msgs/msg/int32_multi_array.h>
 
+std_msgs__msg__Int32MultiArray encoder_msg;
 
 #include <rosidl_runtime_c/string_functions.h>
 volatile long left_ticks = 0;
 volatile long right_ticks = 0;
 
 rcl_publisher_t encoder_publisher;
-robot_interfaces__msg__Encoder encoder_msg;
+
 
 #define G_TO_MS2 9.80665f
 #define DEG_TO_RAD 0.01745329252f
@@ -71,13 +73,7 @@ rcl_subscription_t cmd_vel_subscriber;
 rclc_executor_t executor;
 geometry_msgs__msg__Twist cmd_vel_msg;
 
-rcl_subscription_t cmd_vel_subscriber;
-rclc_executor_t executor;
-geometry_msgs__msg__Twist cmd_vel_msg;
 
-rcl_subscription_t cmd_vel_subscriber;
-rclc_executor_t executor;
-geometry_msgs__msg__Twist cmd_vel_msg;
 
 const uint32_t PUBLISH_PERIOD_MS = 10;
 unsigned long last_publish_time = 0;
@@ -105,7 +101,7 @@ void setupEncoders() {
   rclc_publisher_init_default(
       &encoder_publisher,
       &node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(robot_interfaces, msg, Encoder),
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32MultiArray),
       "encoder"
   );
 }
@@ -116,32 +112,61 @@ void stopMotors() {
   ledcWrite(RIGHT_PWM_CH1, 0); ledcWrite(RIGHT_PWM_CH2, 0);
 }
 
-void driveMotor(int chForward, int chBackward, float speed, bool reversed) {
-  if (reversed) speed = -speed;
+void driveMotor(int pinForward, int pinBackward, float speed, bool reversed) {
+
+  if (reversed)
+    speed = -speed;
+
   int duty = (int)(fabs(speed) / MAX_WHEEL_SPEED_MS * 255.0);
   duty = constrain(duty, 0, 255);
-  if (speed >= 0) { ledcWrite(chForward, duty); ledcWrite(chBackward, 0); }
-  else            { ledcWrite(chForward, 0);    ledcWrite(chBackward, duty); }
-}
 
+
+  if (speed >= 0) {
+
+    // FORWARD
+    ledcWrite(pinForward, 0);
+    ledcWrite(pinBackward, duty);
+
+  } 
+  else {
+
+    // BACKWARD
+    ledcWrite(pinForward, duty);
+    ledcWrite(pinBackward, 0);
+
+  }
+}
 
 void cmd_vel_callback(const void *msgin) {
   const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
   float linear = msg->linear.x;
   float angular = msg->angular.z;
 
+  Serial.print("Linear: ");
+  Serial.print(linear);
+
+  Serial.print(" Angular: ");
+  Serial.println(angular);
+
   float left_speed  = linear - (angular * WHEEL_BASE_M / 2.0);
   float right_speed = linear + (angular * WHEEL_BASE_M / 2.0);
 
-  driveMotor(LEFT_PWM_CH1, LEFT_PWM_CH2, left_speed, LEFT_MOTOR_REVERSED);
-  driveMotor(RIGHT_PWM_CH1, RIGHT_PWM_CH2, right_speed, RIGHT_MOTOR_REVERSED);
+  Serial.print("left_speed: ");
+  Serial.println(left_speed);
+
+  Serial.print("right_speed: ");
+  Serial.println(right_speed);
+
+  driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_speed, LEFT_MOTOR_REVERSED);
+  driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_speed, RIGHT_MOTOR_REVERSED);
 }
 
 void setupMotors() {
-  ledcSetup(LEFT_PWM_CH1, PWM_FREQ, PWM_RESOLUTION);  ledcAttachPin(LEFT_MOTOR_IN1, LEFT_PWM_CH1);
-  ledcSetup(LEFT_PWM_CH2, PWM_FREQ, PWM_RESOLUTION);  ledcAttachPin(LEFT_MOTOR_IN2, LEFT_PWM_CH2);
-  ledcSetup(RIGHT_PWM_CH1, PWM_FREQ, PWM_RESOLUTION); ledcAttachPin(RIGHT_MOTOR_IN1, RIGHT_PWM_CH1);
-  ledcSetup(RIGHT_PWM_CH2, PWM_FREQ, PWM_RESOLUTION); ledcAttachPin(RIGHT_MOTOR_IN2, RIGHT_PWM_CH2);
+  ledcAttach(LEFT_MOTOR_IN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(LEFT_MOTOR_IN2, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(RIGHT_MOTOR_IN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(RIGHT_MOTOR_IN2, PWM_FREQ, PWM_RESOLUTION);
+
   stopMotors();
 }
 
@@ -189,6 +214,9 @@ void setup()
 
     setupMotors();
     Serial.println("Motor pins Initialized");
+    encoder_msg.data.data = (int32_t *)malloc(2 * sizeof(int32_t));
+    encoder_msg.data.size = 2;
+    encoder_msg.data.capacity = 2;
 
     
     rclc_subscription_init_default(
@@ -245,9 +273,9 @@ void loop()
         imu_msg.linear_acceleration_covariance[8] = 0.04;
 
         rcl_publish(&imu_publisher, &imu_msg, NULL);
+        encoder_msg.data.data[0] = left_ticks;
+        encoder_msg.data.data[1] = right_ticks;
 
-        encoder_msg.left_ticks = left_ticks;
-        encoder_msg.right_ticks = right_ticks;
         rcl_publish(&encoder_publisher, &encoder_msg, NULL);
     }
 }

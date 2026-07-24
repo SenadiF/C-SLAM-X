@@ -1,10 +1,11 @@
 import rclpy
 from rclpy.node import Node
-from robot_interfaces.msg import Encoder
+from std_msgs.msg import Int32MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
+
 
 import math
 from tf_transformations import quaternion_from_euler
@@ -48,23 +49,22 @@ class WheelOdometryNode(Node):
         
         #Subscriber 
         
-        self.encoder_subscriber = self.create_subscription(Encoder, encoder_topic, self.encoder_callback, 10)
+        self.encoder_subscriber = self.create_subscription(Int32MultiArray, encoder_topic, self.encoder_callback, 10)
 
         #Publisher
         self.odom_publisher = self.create_publisher(Odometry, odom_topic, 10)
         
         #Encoder callback function
     def encoder_callback(self, msg):
-
         if self.first_reading:
-            self.prev_left_ticks = msg.left_ticks
-            self.prev_right_ticks = msg.right_ticks
-            self.last_time = self.get_clock().now()
-            self.first_reading=False
-            return
+         self.prev_left_ticks = msg.data[0]
+         self.prev_right_ticks = msg.data[1]
+         self.last_time = self.get_clock().now()
+         self.first_reading = False
+         return
 
-        current_left_ticks = msg.left_ticks
-        current_right_ticks = msg.right_ticks   
+        current_left_ticks = msg.data[0]
+        current_right_ticks = msg.data[1]   
           
         left_tick_diff = current_left_ticks - self.prev_left_ticks
         right_tick_diff = current_right_ticks - self.prev_right_ticks

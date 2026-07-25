@@ -1,0 +1,18 @@
+
+Left Motor IN1 - 	GPIO 25	
+Left Motor IN2 -	GPIO 26	
+Right Motor IN3-	GPIO 27	
+Right Motor IN4-	GPIO 14	
+Left Encoder A -        GPIO 4	
+Left Encoder B -        GPIO 13	
+Right Encoder A	-       GPIO 32	
+Right Encoder B	-       GPIO 33	
+IMU SDA	        -       GPIO 21	 
+IMU SCL	        -       GPIO 22	
+LiDAR TX - ESP32 RX	GPIO 16	
+LiDAR RX - ESP32 TX	GPIO 17	
+SD Card MOSI	-       GPIO 23	
+SD Card MISO	-       GPIO 19	
+SD Card SCK	-       GPIO 18	
+
+SD Card CS	-       GPIO 5

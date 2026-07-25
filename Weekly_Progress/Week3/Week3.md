@@ -10,9 +10,9 @@
 
 ## Learnings 
 - If the wi-fi is down or the connection Between the esp32 and pi are down explored the idea of a state machine as follows 
-Normal mode - When connected with pi 
-Local_exploration mode - Try to reach the last given goal if it cannot be reached explore using the follow the gap algorithm (To be studied more )
-Sync mode - When it reconencts and gives the explored data 
+  - Normal mode - When connected with pi 
+  - Local_exploration mode - Try to reach the last given goal if it cannot be reached explore using the follow the gap algorithm (To be studied more )
+  - Sync mode - When it reconencts and gives the explored data 
 
 ## Still to be completed 
 

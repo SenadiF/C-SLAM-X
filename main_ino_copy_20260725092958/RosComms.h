@@ -9,6 +9,7 @@
 #include <sensor_msgs/msg/imu.h>
 #include <geometry_msgs/msg/twist.h>
 #include <std_msgs/msg/int32_multi_array.h>
+#include <sensor_msgs/msg/laser_scan.h>
 
 // WiFi / Agent config
 extern const char* WIFI_SSID;
@@ -31,6 +32,12 @@ extern std_msgs__msg__Int32MultiArray encoder_msg;
 
 extern rcl_subscription_t cmd_vel_subscriber;
 extern geometry_msgs__msg__Twist cmd_vel_msg;
+
+extern rcl_publisher_t buffered_lidar_publisher;
+extern std_msgs__msg__Int32MultiArray buffered_lidar_msg;
+
+extern rcl_publisher_t scan_publisher;
+extern sensor_msgs__msg__LaserScan scan_msg;
 
 void setupRosCore();
 

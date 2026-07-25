@@ -2,6 +2,9 @@
 #include "Encoders.h"
 #include "ImuSensor.h"
 #include "MotorControl.h"
+#include "LidarReader.h"
+#include "SdLogger.h"
+#include "StateMachine.h"
 
 const uint32_t PUBLISH_PERIOD_MS = 10;
 unsigned long last_publish_time = 0;
@@ -18,6 +21,8 @@ void setup() {
   setupImu();
   setupEncoders();
   setupMotors();
+  setupLidar();
+  setupSd();
 
   rclc_subscription_init_default(
       &cmd_vel_subscriber, &node,
@@ -27,17 +32,20 @@ void setup() {
   rclc_executor_init(&executor, &support.context, 1, &allocator);
   rclc_executor_add_subscription(&executor, &cmd_vel_subscriber, &cmd_vel_msg, &cmd_vel_callback, ON_NEW_DATA);
   Serial.println("cmd_vel subscriber ready.");
+
+  setState(INITIALIZE);
 }
 
 void loop() {
   rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
-  updateMotorPID();
+  updateStateMachine();  
 
   unsigned long current_time = millis();
   if (current_time - last_publish_time >= PUBLISH_PERIOD_MS) {
     last_publish_time = current_time;
 
     publishImuData(current_time);
+    publishLidarScan(current_time); 
 
     encoder_msg.data.data[0] = left_ticks;
     encoder_msg.data.data[1] = right_ticks;

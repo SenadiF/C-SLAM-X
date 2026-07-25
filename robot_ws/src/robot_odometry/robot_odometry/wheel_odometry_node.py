@@ -20,13 +20,13 @@ class WheelOdometryNode(Node):
 
         #Parameters
         self.declare_parameter('robot_name','robot1')
-        self.declare_parameter('wheel_radius',0.016)
+        
         self.declare_parameter('wheel_base',0.099)
-        self.declare_parameter('ticks_per_revolution', 350)
+        self.declare_parameter('ticks_per_meter', 3480.0)
         self.first_reading=True
         
         self.robot_name = self.get_parameter('robot_name').value
-        self.wheel_radius = self.get_parameter('wheel_radius').value 
+        
         self.wheel_base = self.get_parameter('wheel_base').value
         self.ticks_per_revolution = self.get_parameter('ticks_per_revolution').value
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -71,8 +71,8 @@ class WheelOdometryNode(Node):
 
         distance_per_tick = 2 * math.pi * self.wheel_radius / self.ticks_per_revolution
 
-        left_distance = left_tick_diff * distance_per_tick
-        right_distance = right_tick_diff * distance_per_tick
+        left_distance = left_tick_diff /self.ticjks_per_meter
+        right_distance = right_tick_diff /self.ticks_per_meter
 
         distance = (left_distance + right_distance) / 2.0
         delta_theta = (right_distance - left_distance) / self.wheel_base

@@ -12,9 +12,9 @@
 #include <sensor_msgs/msg/laser_scan.h>
 
 // WiFi / Agent config
-extern const char* WIFI_SSID;
-extern const char* WIFI_PASSWORD;
-extern IPAddress AGENT_IP;
+extern char* WIFI_SSID;
+extern char* WIFI_PASSWORD;
+extern char* AGENT_IP;
 extern const uint16_t AGENT_PORT;
 
 // ROS objects

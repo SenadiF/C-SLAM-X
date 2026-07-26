@@ -13,6 +13,9 @@
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
 
+extern float target_left_speed;
+extern float target_right_speed;
+
 extern unsigned long last_cmd_vel_time;
 extern const unsigned long CMD_VEL_TIMEOUT_MS;
 

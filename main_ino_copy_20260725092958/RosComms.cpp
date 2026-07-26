@@ -1,9 +1,9 @@
 #include "RosComms.h"
 #include <rosidl_runtime_c/string_functions.h>
 
-const char* WIFI_SSID = "Sena";
-const char* WIFI_PASSWORD = "Devanga@123";
-IPAddress AGENT_IP(172, 20, 10, 6);
+char* WIFI_SSID = (char*)"Sena";
+char* WIFI_PASSWORD = (char*)"Devanga@123";
+char* AGENT_IP = (char*)"172.20.10.6";
 const uint16_t AGENT_PORT = 8888;
 
 rcl_allocator_t allocator;

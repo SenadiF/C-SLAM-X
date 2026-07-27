@@ -217,6 +217,17 @@ void updateMotorPID() {
 void setup()
 {
     Serial.begin(115200);
+
+    
+    pinMode(LEFT_MOTOR_IN1, OUTPUT);
+    pinMode(LEFT_MOTOR_IN2, OUTPUT);
+    pinMode(RIGHT_MOTOR_IN1, OUTPUT);
+    pinMode(RIGHT_MOTOR_IN2, OUTPUT);
+    digitalWrite(LEFT_MOTOR_IN1, LOW);
+    digitalWrite(LEFT_MOTOR_IN2, LOW);
+    digitalWrite(RIGHT_MOTOR_IN1, LOW);
+    digitalWrite(RIGHT_MOTOR_IN2, LOW);
+
     delay(2000);
     Serial.println("Starting Robot IMU Node...");
 
@@ -224,13 +235,9 @@ void setup()
     Wire.setClock(400000);
 
     set_microros_wifi_transports(
-        "Sena",
-        "Devanga@123",
-        "172.20.10.6",
-        8888
+        "Sena", "Devanga@123", "172.20.10.6", 8888
     );
     delay(2000);
-
     rosidl_runtime_c__String__assign(&imu_msg.header.frame_id, "imu_link");
 
     allocator = rcl_get_default_allocator();

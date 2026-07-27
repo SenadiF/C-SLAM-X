@@ -26,7 +26,7 @@ float target_right_speed=0.0;
 
 const float KP=50.0;
 //dummy value to be removed after calibrating correctly 
-const float TICKS_PER_METER=3480.0 ;
+const float TICKS_PER_METER=1471.67;
 
 
 
@@ -64,7 +64,7 @@ GyroData gyroData;
 #define RIGHT_MOTOR_IN1 27
 #define RIGHT_MOTOR_IN2 14
 
-#define LEFT_MOTOR_REVERSED  false
+#define LEFT_MOTOR_REVERSED  true
 #define RIGHT_MOTOR_REVERSED false
 
 
@@ -125,8 +125,10 @@ void setupEncoders() {
 
 
 void stopMotors() {
-  ledcWrite(LEFT_PWM_CH1, 0);  ledcWrite(LEFT_PWM_CH2, 0);
-  ledcWrite(RIGHT_PWM_CH1, 0); ledcWrite(RIGHT_PWM_CH2, 0);
+  ledcWrite(LEFT_MOTOR_IN1, 0);
+  ledcWrite(LEFT_MOTOR_IN2, 0);
+  ledcWrite(RIGHT_MOTOR_IN1, 0);
+  ledcWrite(RIGHT_MOTOR_IN2, 0);
 }
 
 void driveMotor(int pinForward, int pinBackward, float speed, bool reversed) {

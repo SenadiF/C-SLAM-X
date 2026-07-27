@@ -22,7 +22,7 @@ class WheelOdometryNode(Node):
         self.declare_parameter('robot_name','robot1')
         
         self.declare_parameter('wheel_base',0.099)
-        self.declare_parameter('ticks_per_meter', 3480.0)
+        self.declare_parameter('ticks_per_meter', 1471.67)
         self.first_reading=True
         
         self.robot_name = self.get_parameter('robot_name').value

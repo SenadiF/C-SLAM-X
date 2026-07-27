@@ -14,7 +14,7 @@ float target_left_speed = 0.0;
 float target_right_speed = 0.0;
 
 const float KP = 50.0;
-const float TICKS_PER_METER = 3480.0; // dummy value — replace after calibration
+const float TICKS_PER_METER =1471.67; 
 const float WHEEL_BASE_M = 0.099;
 const float MAX_WHEEL_SPEED_MS = 0.3;
 

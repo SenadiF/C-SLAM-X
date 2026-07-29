@@ -5,6 +5,8 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <sensor_msgs/msg/laser_scan.h>
+#include "LidarParserSTL.h"  
 
 #include <sensor_msgs/msg/imu.h>
 
@@ -77,6 +79,15 @@ GyroData gyroData;
 
 const float WHEEL_BASE_M = 0.099;       
 const float MAX_WHEEL_SPEED_MS = 0.3;   
+
+LidarParserSTL lidar;
+HardwareSerial LidarSerial(2);
+uint16_t lidarDistances[360] = {0};
+
+rcl_publisher_t scan_publisher;         
+sensor_msgs__msg__LaserScan scan_msg;  
+const uint32_t SCAN_PUBLISH_PERIOD_MS = 100;  
+unsigned long last_scan_publish_time = 0;   
 
 // ROS objects
 rcl_allocator_t allocator;
@@ -214,6 +225,54 @@ void updateMotorPID() {
   driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_output, LEFT_MOTOR_REVERSED);
   driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_output, RIGHT_MOTOR_REVERSED);
 }
+
+void onLidarPoint(const LidarResultData& point, void* ref) {
+  int angleDeg = ((int)point.angle) % 360;
+  if (angleDeg < 0) angleDeg += 360;
+  lidarDistances[angleDeg] = (uint16_t)(point.distance * 1000.0f);
+}
+
+void setupLidar() {
+  LidarSerial.begin(230400, SERIAL_8N1, 16, 17);
+  lidar.setResultCallback(onLidarPoint);
+  lidar.setAngleUnit(LidarAngleUnit::DEG);
+  lidar.setDistanceUnit(LidarDistanceUnit::M);
+  lidar.setLogLevel(LidarLogLevel::OFF);
+  lidar.begin();
+
+  rosidl_runtime_c__String__assign(&scan_msg.header.frame_id, "lidar_link");
+  scan_msg.ranges.data = (float *)malloc(360 * sizeof(float));
+  scan_msg.ranges.size = 360;
+  scan_msg.ranges.capacity = 360;
+  scan_msg.intensities.data = NULL;
+  scan_msg.intensities.size = 0;
+  scan_msg.intensities.capacity = 0;
+  scan_msg.angle_min = 0.0;
+  scan_msg.angle_max = 2 * PI;
+  scan_msg.angle_increment = (2 * PI) / 360.0;
+  scan_msg.time_increment = 0.0;
+  scan_msg.scan_time = 0.1;
+  scan_msg.range_min = 0.02;
+  scan_msg.range_max = 12.0;
+
+  rclc_publisher_init_default(
+      &scan_publisher, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
+      "scan"
+  );
+}
+
+void publishScan(unsigned long current_time) {
+  for (int i = 0; i < 360; i++) {
+    scan_msg.ranges.data[i] = (lidarDistances[i] == 0)
+      ? INFINITY
+      : lidarDistances[i] / 1000.0;
+  }
+  scan_msg.header.stamp.sec = current_time / 1000;
+  scan_msg.header.stamp.nanosec = (current_time % 1000) * 1000000;
+  rcl_publish(&scan_publisher, &scan_msg, NULL);
+}
+
 void setup()
 {
     Serial.begin(115200);
@@ -230,20 +289,26 @@ void setup()
 
     delay(2000);
     Serial.println("Starting Robot IMU Node...");
+    
 
     Wire.begin();
+    Serial.println("1");
     Wire.setClock(400000);
-
+    Serial.println("2");
     set_microros_wifi_transports(
         "Sena", "Devanga@123", "172.20.10.6", 8888
     );
+    Serial.println("3");
     delay(2000);
+    Serial.println("Starting ...");
     rosidl_runtime_c__String__assign(&imu_msg.header.frame_id, "imu_link");
 
     allocator = rcl_get_default_allocator();
+    Serial.println("r1");
     rclc_support_init(&support, 0, NULL, &allocator);
+    Serial.println("r2");
     rclc_node_init_default(&node, "imu_node", "robot1", &support);
-
+    Serial.println("r3");
     rclc_publisher_init_default(
         &imu_publisher,
         &node,
@@ -252,19 +317,28 @@ void setup()
     );
 
     int err = IMU.init(calib, IMU_ADDRESS);
+
     if (err != 0)
-    {
-        Serial.print("IMU initialization failed: ");
-        Serial.println(err);
-        while (true);
+   {
+    Serial.print(" IMU initialization failed. Error: ");
+    Serial.println(err);
+
+    Serial.println("Continuing without IMU...");
     }
+    else
+   {
     Serial.println("BMI160 Initialized.");
+    }
+    
 
     setupEncoders();
     Serial.println("Encoders Initialized");
 
     setupMotors();
     Serial.println("Motor pins Initialized");
+
+    setupLidar();                          
+    Serial.println("LiDAR Initialized");   
     encoder_msg.data.data = (int32_t *)malloc(2 * sizeof(int32_t));
     encoder_msg.data.size = 2;
     encoder_msg.data.capacity = 2;
@@ -285,6 +359,7 @@ void loop()
 {
     rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
     updateMotorPID();  
+    lidar.readData(LidarSerial);
 
     unsigned long current_time = millis();
     if (current_time - last_publish_time >= PUBLISH_PERIOD_MS) {
@@ -329,4 +404,8 @@ void loop()
 
         rcl_publish(&encoder_publisher, &encoder_msg, NULL);
     }
+
+    if (current_time - last_scan_publish_time >= SCAN_PUBLISH_PERIOD_MS) {
+        last_scan_publish_time = current_time;
+        publishScan(current_time);}
 }

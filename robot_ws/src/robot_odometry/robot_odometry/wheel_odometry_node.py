@@ -69,7 +69,7 @@ class WheelOdometryNode(Node):
         left_tick_diff = current_left_ticks - self.prev_left_ticks
         right_tick_diff = current_right_ticks - self.prev_right_ticks
 
-        distance_per_tick = 2 * math.pi * self.wheel_radius / self.ticks_per_revolution
+        
 
         left_distance = left_tick_diff /self.ticks_per_meter
         right_distance = right_tick_diff /self.ticks_per_meter

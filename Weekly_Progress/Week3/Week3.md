@@ -11,9 +11,9 @@
 
 The screenshots of the tasks done are attached below:
 
-![Single robot encoder input to wheel odometry verification ](./Ticks_per_meter.png) 
-![Single robot encoder input to wheel odometry verification ](./lidar_echo.png) 
-![Single robot encoder input to wheel odometry verification ](./rviz_lidar.png) 
+![Encoder Testing ](./Tlcks_per_meter.png) 
+![Lidar Topic echo ](./lidar_echo.png) 
+![Rviz lidar scan](./rviz_lidar.png) 
 
 
 

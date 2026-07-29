@@ -11,9 +11,9 @@
 
 The screenshots of the tasks done are attached below:
 
-![Encoder Testing ](./Tlcks_per_meter.png) 
+![Encoder Testing ](./Encoder.png) 
 ![Lidar Topic echo ](./lidar_echo.png) 
-![Rviz lidar scan](./rviz_lidar.png) 
+![Rviz lidar scan](./rviz_lidar_scan.png) 
 
 
 

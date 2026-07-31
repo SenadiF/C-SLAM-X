@@ -1,6 +1,6 @@
 
-Left Motor IN1 - 	GPIO 25	
-Left Motor IN2 -	GPIO 26	
+Left Motor IN1 - 	GPIO 2
+Left Motor IN2 -	GPIO 15
 Right Motor IN3-	GPIO 27	
 Right Motor IN4-	GPIO 14	
 Left Encoder A -        GPIO 4	

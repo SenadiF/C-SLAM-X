@@ -26,7 +26,7 @@ const unsigned long PID_PERIOD_MS=50;
 float target_left_speed= 0.0;
 float target_right_speed=0.0;
 
-const float KP=50.0;
+const float KP=5.0;
 //dummy value to be removed after calibrating correctly 
 const float TICKS_PER_METER=1471.67;
 
@@ -61,8 +61,8 @@ GyroData gyroData;
 #define RIGHT_ENC_B 33
 //
 //Motor driver
-#define LEFT_MOTOR_IN1 25
-#define LEFT_MOTOR_IN2 26
+#define LEFT_MOTOR_IN1 2
+#define LEFT_MOTOR_IN2 15
 #define RIGHT_MOTOR_IN1 27
 #define RIGHT_MOTOR_IN2 14
 
@@ -78,7 +78,7 @@ GyroData gyroData;
 #define PWM_RESOLUTION 8
 
 const float WHEEL_BASE_M = 0.099;       
-const float MAX_WHEEL_SPEED_MS = 0.3;   
+const float MAX_WHEEL_SPEED_MS = 0.4;   
 
 LidarParserSTL lidar;
 HardwareSerial LidarSerial(2);
@@ -148,8 +148,12 @@ void driveMotor(int pinForward, int pinBackward, float speed, bool reversed) {
     speed = -speed;
 
   int duty = (int)(fabs(speed) / MAX_WHEEL_SPEED_MS * 255.0);
+  //int duty = 150;
   duty = constrain(duty, 0, 255);
-
+  const int MIN_DUTY = 100; 
+  if (duty > 0 && duty < MIN_DUTY) {
+    duty = MIN_DUTY;
+  }
 
   if (speed >= 0) {
 
@@ -189,8 +193,9 @@ void cmd_vel_callback(const void *msgin) {
   Serial.print("target_right_speed: ");
   Serial.println(target_right_speed);
 
-  
-  
+  // ---- PID BYPASS: drive directly from cmd_vel, no PID correction ----
+  driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, target_left_speed, LEFT_MOTOR_REVERSED);
+  driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, target_right_speed, RIGHT_MOTOR_REVERSED);
 }
 
 void setupMotors() {
@@ -201,6 +206,8 @@ void setupMotors() {
 
   stopMotors();
 }
+
+/* ---- PID DISABLED FOR TESTING ----
 void updateMotorPID() {
   if (millis() - last_pid_time < PID_PERIOD_MS) return;
   float dt = (millis() - last_pid_time) / 1000.0;
@@ -225,6 +232,7 @@ void updateMotorPID() {
   driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_output, LEFT_MOTOR_REVERSED);
   driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_output, RIGHT_MOTOR_REVERSED);
 }
+*/
 
 void onLidarPoint(const LidarResultData& point, void* ref) {
   int angleDeg = ((int)point.angle) % 360;
@@ -298,8 +306,15 @@ void setup()
     set_microros_wifi_transports(
         "Sena", "Devanga@123", "172.20.10.6", 8888
     );
+    delay(2000);
     Serial.println("3");
     delay(2000);
+    dacDisable(LEFT_MOTOR_IN1); // Pin 25
+    dacDisable(LEFT_MOTOR_IN2); // Pin 26
+
+   
+    ledcAttach(LEFT_MOTOR_IN1, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttach(LEFT_MOTOR_IN2, PWM_FREQ, PWM_RESOLUTION);
     Serial.println("Starting ...");
     rosidl_runtime_c__String__assign(&imu_msg.header.frame_id, "imu_link");
 
@@ -358,8 +373,13 @@ void setup()
 void loop()
 {
     rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
-    updateMotorPID();  
+    // updateMotorPID();   // PID DISABLED FOR TESTING
     lidar.readData(LidarSerial);
+
+    // Basic watchdog, since PID isn't handling this anymore
+    if (millis() - last_cmd_vel_time > CMD_VEL_TIMEOUT_MS) {
+      stopMotors();
+    }
 
     unsigned long current_time = millis();
     if (current_time - last_publish_time >= PUBLISH_PERIOD_MS) {

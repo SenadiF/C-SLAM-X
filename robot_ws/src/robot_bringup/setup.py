@@ -14,6 +14,9 @@ setup(
 
     ('share/' + package_name + '/launch',
         ['launch/robot.launch.py']),
+('share/' + package_name + '/launch',
+    ['launch/static_tf.launch.py']),
+   
     ],
     install_requires=['setuptools'],
     zip_safe=True,

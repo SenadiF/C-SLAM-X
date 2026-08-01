@@ -78,7 +78,7 @@ GyroData gyroData;
 #define PWM_RESOLUTION 8
 
 const float WHEEL_BASE_M = 0.099;       
-const float MAX_WHEEL_SPEED_MS = 0.4;   
+const float MAX_WHEEL_SPEED_MS = 0.6;   
 
 LidarParserSTL lidar;
 HardwareSerial LidarSerial(2);
@@ -266,7 +266,7 @@ void setupLidar() {
   rclc_publisher_init_default(
       &scan_publisher, &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
-      "scan"
+      "scan_raw"
   );
 }
 
@@ -276,8 +276,8 @@ void publishScan(unsigned long current_time) {
       ? INFINITY
       : lidarDistances[i] / 1000.0;
   }
-  scan_msg.header.stamp.sec = current_time / 1000;
-  scan_msg.header.stamp.nanosec = (current_time % 1000) * 1000000;
+  scan_msg.header.stamp.sec =0;
+  scan_msg.header.stamp.nanosec =0;
   rcl_publish(&scan_publisher, &scan_msg, NULL);
 }
 
@@ -301,7 +301,21 @@ void setup()
 
     Wire.begin();
     Serial.println("1");
-    Wire.setClock(400000);
+    Wire.setClock(100000);
+
+    int err = IMU.init(calib, IMU_ADDRESS);
+
+    if (err != 0)
+   {
+    Serial.print(" IMU initialization failed. Error: ");
+    Serial.println(err);
+
+    Serial.println("Continuing without IMU...");
+    }
+    else
+   {
+    Serial.println("BMI160 Initialized.");
+    }
     Serial.println("2");
     set_microros_wifi_transports(
         "Sena", "Devanga@123", "172.20.10.6", 8888
@@ -309,8 +323,8 @@ void setup()
     delay(2000);
     Serial.println("3");
     delay(2000);
-    dacDisable(LEFT_MOTOR_IN1); // Pin 25
-    dacDisable(LEFT_MOTOR_IN2); // Pin 26
+    dacDisable(LEFT_MOTOR_IN1); 
+    dacDisable(LEFT_MOTOR_IN2); 
 
    
     ledcAttach(LEFT_MOTOR_IN1, PWM_FREQ, PWM_RESOLUTION);
@@ -328,22 +342,10 @@ void setup()
         &imu_publisher,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-        "imu"
+        "imu_raw"
     );
 
-    int err = IMU.init(calib, IMU_ADDRESS);
-
-    if (err != 0)
-   {
-    Serial.print(" IMU initialization failed. Error: ");
-    Serial.println(err);
-
-    Serial.println("Continuing without IMU...");
-    }
-    else
-   {
-    Serial.println("BMI160 Initialized.");
-    }
+    
     
 
     setupEncoders();
@@ -405,8 +407,8 @@ void loop()
         imu_msg.angular_velocity.y = gy;
         imu_msg.angular_velocity.z = gz;
 
-        imu_msg.header.stamp.sec = current_time / 1000;
-        imu_msg.header.stamp.nanosec = (current_time % 1000) * 1000000;
+        imu_msg.header.stamp.sec = 0;
+        imu_msg.header.stamp.nanosec = 0;
 
         imu_msg.orientation_covariance[0] = -1;
 

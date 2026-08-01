@@ -1,21 +1,63 @@
-#define LEFT_ENC_A  4
-#define LEFT_ENC_B  13
-#define RIGHT_ENC_A 32
-#define RIGHT_ENC_B 33
+#include <Wire.h>
+#include <FastIMU.h>
+
+#define IMU_ADDRESS 0x69
+
+BMI160 IMU;
+calData calib = {0};
+
+AccelData accelData;
+GyroData gyroData;
 
 void setup() {
   Serial.begin(115200);
-  pinMode(LEFT_ENC_A, INPUT_PULLUP);
-  pinMode(LEFT_ENC_B, INPUT_PULLUP);
-  pinMode(RIGHT_ENC_A, INPUT_PULLUP);
-  pinMode(RIGHT_ENC_B, INPUT_PULLUP);
+  delay(2000);
+
+  Serial.println("Starting BMI160 Test...");
+
+  Wire.begin(21, 22);
+  Wire.setClock(100000);
+
+  int err = IMU.init(calib, IMU_ADDRESS);
+
+  if (err != 0) {
+    Serial.print("IMU init failed! Error: ");
+    Serial.println(err);
+
+    while (1) {
+      delay(1000);
+    }
+  }
+
+  Serial.println("BMI160 initialized successfully!");
 }
 
 void loop() {
-  // Read raw pin voltage states
-  Serial.print("Left A: "); Serial.print(digitalRead(LEFT_ENC_A));
-  Serial.print(" | Left B: "); Serial.print(digitalRead(LEFT_ENC_B));
-  Serial.print(" || Right A: "); Serial.print(digitalRead(RIGHT_ENC_A));
-  Serial.print(" | Right B: "); Serial.println(digitalRead(RIGHT_ENC_B));
-  delay(150);
+
+  IMU.update();
+
+  IMU.getAccel(&accelData);
+  IMU.getGyro(&gyroData);
+
+  Serial.println("----------------");
+
+  Serial.print("Accel X (g): ");
+  Serial.println(accelData.accelX, 4);
+
+  Serial.print("Accel Y (g): ");
+  Serial.println(accelData.accelY, 4);
+
+  Serial.print("Accel Z (g): ");
+  Serial.println(accelData.accelZ, 4);
+
+  Serial.print("Gyro X (deg/s): ");
+  Serial.println(gyroData.gyroX, 4);
+
+  Serial.print("Gyro Y (deg/s): ");
+  Serial.println(gyroData.gyroY, 4);
+
+  Serial.print("Gyro Z (deg/s): ");
+  Serial.println(gyroData.gyroZ, 4);
+
+  delay(500);
 }

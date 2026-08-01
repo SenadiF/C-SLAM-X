@@ -1,32 +1,46 @@
 import os
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 
+
 def generate_launch_description():
-    
+
     namespace = LaunchConfiguration('namespace')
 
-    package_share = get_package_share_directory('robot_localization_config')
-    ekf_config = os.path.join(package_share, 'config', 'ekf.yaml')
+    pkg_share = get_package_share_directory(
+        'robot_localization_config'
+    )
+
+    slam_config = os.path.join(
+        pkg_share,
+        'config',
+        'slam.yaml'
+    )
+
 
     return LaunchDescription([
+
         DeclareLaunchArgument(
-            'namespace', 
+            'namespace',
             default_value='robot1',
-            description='Top-level namespace for the robot nodes'
+            description='Robot namespace'
         ),
 
-        
+
         Node(
-            package='robot_localization',
-            executable='ekf_node',
-            name='ekf_filter_node', 
+            package='slam_toolbox',
+            executable='sync_slam_toolbox_node',
+            name='slam_toolbox',
             namespace=namespace,
             output='screen',
-           
-            parameters=[ekf_config, {'use_sim_time': False}], 
-        ),
+
+            parameters=[
+                slam_config
+            ]
+        )
+
     ])

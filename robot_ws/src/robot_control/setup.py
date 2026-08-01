@@ -23,7 +23,7 @@ setup(
         ],
     },
     entry_points={
-        'console_scripts': [
-        ],
+        'console_scripts': [ 'time_node = robot_control.time:main',
+],
     },
 )

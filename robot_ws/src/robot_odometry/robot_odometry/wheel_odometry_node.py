@@ -72,8 +72,8 @@ class WheelOdometryNode(Node):
 
         
 
-        left_distance = left_tick_diff /self.ticks_per_meter
-        right_distance = +right_tick_diff /self.ticks_per_meter
+        left_distance = -left_tick_diff /self.ticks_per_meter
+        right_distance = right_tick_diff /self.ticks_per_meter
 
         distance = (left_distance + right_distance) / 2.0
         delta_theta = (right_distance - left_distance) / self.wheel_base

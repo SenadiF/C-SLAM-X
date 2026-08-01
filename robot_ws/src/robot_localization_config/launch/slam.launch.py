@@ -20,27 +20,39 @@ def generate_launch_description():
         'config',
         'slam.yaml'
     )
-
-
     return LaunchDescription([
 
-        DeclareLaunchArgument(
-            'namespace',
-            default_value='robot1',
-            description='Robot namespace'
-        ),
+    DeclareLaunchArgument(
+        'namespace',
+        default_value='robot1',
+        description='Robot namespace'
+    ),
 
+    Node(
+        package='slam_toolbox',
+        executable='sync_slam_toolbox_node',
+        name='slam_toolbox',
+        namespace=namespace,
+        output='screen',
+        parameters=[
+            slam_config
+        ]
+    ),
 
-        Node(
-            package='slam_toolbox',
-            executable='sync_slam_toolbox_node',
-            name='slam_toolbox',
-            namespace=namespace,
-            output='screen',
+    Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_slam',
+        namespace=namespace,
+        output='screen',
+        parameters=[
+            {
+                'autostart': True,
+                'node_names': [
+                    'slam_toolbox'
+                ]
+            }
+        ]
+    )
 
-            parameters=[
-                slam_config
-            ]
-        )
-
-    ])
+])

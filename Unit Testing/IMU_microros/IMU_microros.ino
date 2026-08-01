@@ -28,7 +28,7 @@ float target_right_speed=0.0;
 
 const float KP=5.0;
 //dummy value to be removed after calibrating correctly 
-const float TICKS_PER_METER=1471.67;
+const float TICKS_PER_METER = 13313.0;;
 
 
 

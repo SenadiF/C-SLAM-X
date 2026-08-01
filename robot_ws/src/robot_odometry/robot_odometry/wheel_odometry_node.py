@@ -22,7 +22,7 @@ class WheelOdometryNode(Node):
         self.declare_parameter('robot_name','robot1')
         
         self.declare_parameter('wheel_base',0.099)
-        self.declare_parameter('ticks_per_meter', 1471.67)
+        self.declare_parameter('ticks_per_meter', 13313.0)
         self.first_reading=True
         
         self.robot_name = self.get_parameter('robot_name').value
@@ -64,7 +64,8 @@ class WheelOdometryNode(Node):
          return
 
         current_left_ticks = msg.data[0]
-        current_right_ticks = msg.data[1]   
+        current_right_ticks = msg.data[1] 
+        print(f"Current Left Ticks: {current_left_ticks}, Current Right Ticks: {current_right_ticks}")
           
         left_tick_diff = current_left_ticks - self.prev_left_ticks
         right_tick_diff = current_right_ticks - self.prev_right_ticks
@@ -72,7 +73,7 @@ class WheelOdometryNode(Node):
         
 
         left_distance = left_tick_diff /self.ticks_per_meter
-        right_distance = right_tick_diff /self.ticks_per_meter
+        right_distance = +right_tick_diff /self.ticks_per_meter
 
         distance = (left_distance + right_distance) / 2.0
         delta_theta = (right_distance - left_distance) / self.wheel_base

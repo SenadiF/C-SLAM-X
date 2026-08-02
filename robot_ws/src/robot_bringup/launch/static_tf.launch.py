@@ -34,7 +34,7 @@ def generate_launch_description():
                 '0',       
                 '0',        
                 'robot1/base_link',
-                'lidar_link'  
+                'robot1/lidar_link'  
             ]
         ),
       

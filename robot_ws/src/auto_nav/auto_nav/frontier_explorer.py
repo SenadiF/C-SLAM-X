@@ -37,7 +37,10 @@ class FrontierExplorer(Node):
             OccupancyGrid, f'/{self.robot_name}/map', self.map_callback, 1)
         self.goal_pub = self.create_publisher(
             PoseStamped, f'/{self.robot_name}/frontier_goal', 10)
-
+        self.done_pub = self.create_publisher(bool,
+    '/robot1/exploration_done',
+    10
+)
         self.create_timer(poll_period, self.explore)
         self.get_logger().info('Frontier explorer ready.')
 
@@ -123,6 +126,10 @@ class FrontierExplorer(Node):
         frontiers = self.find_frontiers()
         if not frontiers:
             self.get_logger().info('No frontiers found — exploration may be complete.')
+            msg = bool()
+            msg.data = True
+            self.done_pub.publish(msg)
+    
             return
 
      

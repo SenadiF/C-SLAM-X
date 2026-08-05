@@ -52,8 +52,13 @@ class FrontierExplorer(Node):
             return tf.transform.translation.x, tf.transform.translation.y
         except Exception:
             self.get_logger().debug('Waiting for TF...')
-            return None
 
+            return None
+    def map_callback(self, msg):
+     self.map = msg
+     self.get_logger().info(
+        f"Map received: {msg.info.width} x {msg.info.height}"
+    )
     def world_to_grid(self, x, y):
         info = self.map.info
         gx = int((x - info.origin.position.x) / info.resolution)
@@ -130,7 +135,7 @@ class FrontierExplorer(Node):
     
             return
 
-     
+      
        
         best, best_dist = None, float('inf')
         for fx, fy in frontiers:

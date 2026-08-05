@@ -248,7 +248,7 @@ void setupLidar() {
   lidar.setLogLevel(LidarLogLevel::OFF);
   lidar.begin();
 
-  rosidl_runtime_c__String__assign(&scan_msg.header.frame_id, "lidar_link");
+  rosidl_runtime_c__String__assign(&scan_msg.header.frame_id, "robot1/lidar_link");
   scan_msg.ranges.data = (float *)malloc(360 * sizeof(float));
   scan_msg.ranges.size = 360;
   scan_msg.ranges.capacity = 360;

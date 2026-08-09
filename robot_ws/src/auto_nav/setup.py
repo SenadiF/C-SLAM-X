@@ -28,7 +28,8 @@ setup(
         'astar_planner = auto_nav.astar_planner:main',
         'pure_pursuit = auto_nav.pure_pursuit:main',
         'robot_controller = auto_nav.robot_controller:main',
-        'robot_coordinator = auto_nav.robot_coordinator:main'
+        'robot_coordinator = auto_nav.robot_coordinator:main',
+        'simple_controller = auto_nav.simple_controller:main',
         ],
     },
 )

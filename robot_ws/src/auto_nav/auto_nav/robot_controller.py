@@ -1,173 +1,454 @@
 import rclpy
 from rclpy.node import Node
+
 from geometry_msgs.msg import Twist, PoseStamped
 from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry
+
 import math
 import numpy as np
+
+from tf2_ros import Buffer, TransformListener
 
 
 class RobotController(Node):
 
     def __init__(self):
+
         super().__init__('robot_controller')
-        
-        # Parameters
+
+        # ============================================================
+        # PARAMETERS
+        # ============================================================
+
         self.declare_parameter('robot_name', 'robot1')
-        self.declare_parameter('linear_speed', 0.6)
-        self.declare_parameter('angular_speed', 0.4)  # Boosted slightly for quicker turns
-        self.declare_parameter('safe_distance', 0.4)
-        self.declare_parameter('goal_tolerance', 0.05)
-        
-        self.robot_name = self.get_parameter('robot_name').value
-        self.linear_speed = self.get_parameter('linear_speed').value
-        self.angular_speed = self.get_parameter('angular_speed').value
-        self.safe_distance = self.get_parameter('safe_distance').value
-        self.goal_tolerance = self.get_parameter('goal_tolerance').value
-        
-        # Publishers
-        self.cmd_vel_pub = self.create_publisher(Twist, f'/{self.robot_name}/cmd_vel', 10)
-        
-        # Subscribers
+        self.declare_parameter('linear_speed', 0.12)
+        self.declare_parameter('angular_speed', 0.5)
+        self.declare_parameter('safe_distance', 0.35)
+        self.declare_parameter('goal_tolerance', 0.15)
+
+        self.robot_name = self.get_parameter(
+            'robot_name'
+        ).value
+
+        self.linear_speed = self.get_parameter(
+            'linear_speed'
+        ).value
+
+        self.angular_speed = self.get_parameter(
+            'angular_speed'
+        ).value
+
+        self.safe_distance = self.get_parameter(
+            'safe_distance'
+        ).value
+
+        self.goal_tolerance = self.get_parameter(
+            'goal_tolerance'
+        ).value
+
+        # ============================================================
+        # FRAMES
+        # ============================================================
+
+        self.map_frame = 'map'
+        self.base_frame = f'{self.robot_name}/base_link'
+
+        # ============================================================
+        # TF
+        # ============================================================
+
+        self.tf_buffer = Buffer()
+
+        self.tf_listener = TransformListener(
+            self.tf_buffer,
+            self
+        )
+
+        # ============================================================
+        # PUBLISHER
+        # ============================================================
+
+        self.cmd_pub = self.create_publisher(
+            Twist,
+            f'/{self.robot_name}/cmd_vel',
+            10
+        )
+
+        # ============================================================
+        # SUBSCRIBERS
+        # ============================================================
+
         self.scan_sub = self.create_subscription(
-            LaserScan, f'/{self.robot_name}/scan', self.scan_callback, 10)
-        self.odom_sub = self.create_subscription(
-            Odometry, f'/{self.robot_name}/odometry/filtered', self.odom_callback, 10)
+            LaserScan,
+            f'/{self.robot_name}/scan',
+            self.scan_callback,
+            10
+        )
+
         self.goal_sub = self.create_subscription(
-            PoseStamped, f'/{self.robot_name}/goal_pose', self.goal_callback, 10)
-        
-        # State variables
-        self.current_scan = None
-        self.current_pose = None
-        self.current_goal = None
-        self.goal_reached = True
-        
-        # Control loop timer (10Hz)
-        self.control_timer = self.create_timer(0.1, self.control_loop)
-        self.get_logger().info(f'Robot Controller initialized for {self.robot_name}')
+            PoseStamped,
+            f'/{self.robot_name}/goal_pose',
+            self.goal_callback,
+            10
+        )
+
+        # ============================================================
+        # STATE
+        # ============================================================
+
+        self.scan = None
+        self.goal = None
+
+        self.goal_active = False
+
+        self.last_goal_time = self.get_clock().now()
+
+        # ============================================================
+        # CONTROL LOOP
+        # ============================================================
+
+        self.timer = self.create_timer(
+            0.05,
+            self.control_loop
+        )
+
+        self.get_logger().info(
+            f'RobotController ready for {self.robot_name}'
+        )
+
+    # ================================================================
+    # LASER
+    # ================================================================
 
     def scan_callback(self, msg):
-        self.current_scan = msg
 
-    def odom_callback(self, msg):
-        self.current_pose = msg.pose.pose
+        self.scan = msg
+
+    # ================================================================
+    # GOAL
+    # ================================================================
 
     def goal_callback(self, msg):
-        self.current_goal = (msg.pose.position.x, msg.pose.position.y)
-        self.goal_reached = False
-        self.get_logger().info(f'{self.robot_name} received new target from coordinator: {self.current_goal}')
+
+        self.goal = (
+            msg.pose.position.x,
+            msg.pose.position.y
+        )
+
+        self.goal_active = True
+
+        self.last_goal_time = self.get_clock().now()
+
+        self.get_logger().info(
+            f'New goal: ({self.goal[0]:.2f}, {self.goal[1]:.2f})'
+        )
+
+    # ================================================================
+    # ROBOT POSE IN MAP
+    # ================================================================
+
+    def get_robot_pose(self):
+
+        try:
+
+            transform = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.base_frame,
+                rclpy.time.Time()
+            )
+
+            x = transform.transform.translation.x
+            y = transform.transform.translation.y
+
+            q = transform.transform.rotation
+
+            siny = 2.0 * (
+                q.w * q.z +
+                q.x * q.y
+            )
+
+            cosy = 1.0 - 2.0 * (
+                q.y * q.y +
+                q.z * q.z
+            )
+
+            yaw = math.atan2(
+                siny,
+                cosy
+            )
+
+            return x, y, yaw
+
+        except Exception as e:
+
+            return None
+
+    # ================================================================
+    # OBSTACLE DETECTION
+    # ================================================================
+
+    def get_obstacle_direction(self):
+
+        if self.scan is None:
+            return False, 0.0
+
+        ranges = np.array(
+            self.scan.ranges,
+            dtype=float
+        )
+
+        ranges[
+            ~np.isfinite(ranges)
+        ] = self.scan.range_max
+
+        if len(ranges) < 10:
+            return False, 0.0
+
+        # LaserScan angles are used directly.
+        angles = (
+            self.scan.angle_min +
+            np.arange(len(ranges)) *
+            self.scan.angle_increment
+        )
+
+        # Front sector ±30 degrees
+
+        front_mask = (
+            np.abs(angles) < math.radians(30)
+        )
+
+        front = ranges[front_mask]
+
+        if len(front) == 0:
+            return False, 0.0
+
+        min_front = np.min(front)
+
+        if min_front >= self.safe_distance:
+            return False, 0.0
+
+        # Compare left and right free space
+
+        left_mask = (
+            (angles > math.radians(30)) &
+            (angles < math.radians(120))
+        )
+
+        right_mask = (
+            (angles < math.radians(-30)) &
+            (angles > math.radians(-120))
+        )
+
+        left = ranges[left_mask]
+        right = ranges[right_mask]
+
+        left_mean = (
+            np.mean(left)
+            if len(left) > 0
+            else 0.0
+        )
+
+        right_mean = (
+            np.mean(right)
+            if len(right) > 0
+            else 0.0
+        )
+
+        # Positive = turn left
+        # Negative = turn right
+
+        if left_mean > right_mean:
+
+            return True, 1.0
+
+        else:
+
+            return True, -1.0
+
+    # ================================================================
+    # CONTROL
+    # ================================================================
 
     def control_loop(self):
-        if self.current_scan is None or self.current_pose is None:
+
+        cmd = Twist()
+
+        # ------------------------------------------------------------
+        # No goal
+        # ------------------------------------------------------------
+
+        if not self.goal_active or self.goal is None:
+
+            self.cmd_pub.publish(cmd)
+
             return
-        
-        cmd = Twist()
-        
-        if self.current_goal is not None and not self.goal_reached:
-            if self.is_goal_reached():
-                self.goal_reached = True
-                self.get_logger().info(f'{self.robot_name} reached assigned goal!')
-                self.publish_cmd_vel(cmd)
-                return
-            
-            # FIX: Explicit tuple index access [1] for Y and [0] for X
-            goal_angle = math.atan2(
-                self.current_goal[1] - self.current_pose.position.y,
-                self.current_goal[0] - self.current_pose.position.x
+
+        # ------------------------------------------------------------
+        # Get pose from TF
+        # ------------------------------------------------------------
+
+        pose = self.get_robot_pose()
+
+        if pose is None:
+
+            self.get_logger().warn(
+                'Waiting for map -> base_link TF...',
+                throttle_duration_sec=2.0
             )
-            
-            current_yaw = self.get_yaw_from_pose(self.current_pose)
-            angle_diff = self.normalize_angle(goal_angle - current_yaw)
-            
-            obstacle_detected, obstacle_direction = self.detect_obstacles()
-            
-            if obstacle_detected:
-                cmd = self.obstacle_avoidance_behavior(obstacle_direction)
-            else:
-                # If facing completely away from target, rotate in place first
-                if abs(angle_diff) > 0.5:
-                    cmd.angular.z = self.angular_speed if angle_diff > 0 else -self.angular_speed
-                    cmd.linear.x = 0.0
-                else:
-                    cmd.linear.x = self.linear_speed
-                    cmd.angular.z = self.angular_speed * 1.5 * angle_diff
-        else:
-            cmd.linear.x = 0.0
-            cmd.angular.z = 0.0
-        
-        self.publish_cmd_vel(cmd)
 
-    def detect_obstacles(self):
-        if self.current_scan is None:
-            return False, None
-        
-        ranges = np.array(self.current_scan.ranges)
-        ranges = np.where(np.isfinite(ranges), ranges, self.current_scan.range_max)
-        
-        if len(ranges) == 0:
-            return False, None
+            self.cmd_pub.publish(cmd)
 
-        # Divide into 3 simple regional windows for front-centered blocking check
-        front_ranges = ranges[len(ranges)//3 : 2*len(ranges)//3]
-        min_front_dist = np.min(front_ranges) if len(front_ranges) > 0 else self.current_scan.range_max
-        
-        if min_front_dist < self.safe_distance:
-            left_ranges = ranges[:len(ranges)//4]
-            right_ranges = ranges[3*len(ranges)//4:]
-            
-            avg_left = np.mean(left_ranges) if len(left_ranges) > 0 else 0.0
-            avg_right = np.mean(right_ranges) if len(right_ranges) > 0 else 0.0
-            
-            direction = 'left' if avg_left > avg_right else 'right'
-            return True, direction
-        
-        return False, None
+            return
 
-    def obstacle_avoidance_behavior(self, obstacle_direction):
-        cmd = Twist()
-        # Pivot away from the blocked side cleanly
-        if obstacle_direction == 'left':
-            cmd.angular.z = -self.angular_speed
-        else:
-            cmd.angular.z = self.angular_speed
-        
-        cmd.linear.x = 0.01  # Crawl forward very slowly while turning
-        return cmd
+        rx, ry, yaw = pose
 
-    def is_goal_reached(self):
-        if self.current_goal is None:
-            return True
-        
-        # FIX: Explicit tuple index access [0] and [1]
-        dist = math.sqrt(
-            (self.current_goal[0] - self.current_pose.position.x)**2 +
-            (self.current_goal[1] - self.current_pose.position.y)**2
+        gx, gy = self.goal
+
+        # ------------------------------------------------------------
+        # Distance to goal
+        # ------------------------------------------------------------
+
+        dx = gx - rx
+        dy = gy - ry
+
+        distance = math.hypot(dx, dy)
+
+        # ------------------------------------------------------------
+        # Goal reached
+        # ------------------------------------------------------------
+
+        if distance < self.goal_tolerance:
+
+            self.get_logger().info(
+                'GOAL REACHED!'
+            )
+
+            self.goal_active = False
+
+            self.goal = None
+
+            self.cmd_pub.publish(cmd)
+
+            return
+
+        # ------------------------------------------------------------
+        # Goal direction
+        # ------------------------------------------------------------
+
+        target_angle = math.atan2(
+            dy,
+            dx
         )
-        return dist < self.goal_tolerance
 
-    def get_yaw_from_pose(self, pose):
-        siny_cosp = 2.0 * (pose.orientation.w * pose.orientation.z + pose.orientation.x * pose.orientation.y)
-        cosy_cosp = 1.0 - 2.0 * (pose.orientation.y * pose.orientation.y + pose.orientation.z * pose.orientation.z)
-        return math.atan2(siny_cosp, cosy_cosp)
+        angle_error = (
+            target_angle - yaw
+        )
 
-    def normalize_angle(self, angle):
-        while angle > math.pi:
-            angle -= 2.0 * math.pi
-        while angle < -math.pi:
-            angle += 2.0 * math.pi
-        return angle
+        angle_error = math.atan2(
+            math.sin(angle_error),
+            math.cos(angle_error)
+        )
 
-    def publish_cmd_vel(self, cmd):
-        self.cmd_vel_pub.publish(cmd)
+        # ------------------------------------------------------------
+        # OBSTACLE
+        # ------------------------------------------------------------
+
+        obstacle, direction = \
+            self.get_obstacle_direction()
+
+        if obstacle:
+
+            # Stop forward motion.
+            cmd.linear.x = 0.0
+
+            if direction > 0:
+
+                cmd.angular.z = self.angular_speed
+
+            else:
+
+                cmd.angular.z = -self.angular_speed
+
+            self.cmd_pub.publish(cmd)
+
+            return
+
+        # ------------------------------------------------------------
+        # TURN TOWARD GOAL
+        # ------------------------------------------------------------
+
+        if abs(angle_error) > math.radians(25):
+
+            cmd.linear.x = 0.0
+
+            if angle_error > 0:
+
+                cmd.angular.z = self.angular_speed
+
+            else:
+
+                cmd.angular.z = -self.angular_speed
+
+        # ------------------------------------------------------------
+        # MOVE TOWARD GOAL
+        # ------------------------------------------------------------
+
+        else:
+
+            cmd.linear.x = self.linear_speed
+
+            # proportional steering
+
+            cmd.angular.z = (
+                1.5 * angle_error
+            )
+
+            cmd.angular.z = max(
+                -self.angular_speed,
+                min(
+                    self.angular_speed,
+                    cmd.angular.z
+                )
+            )
+
+        self.cmd_pub.publish(cmd)
+
+    # ================================================================
+    # SHUTDOWN
+    # ================================================================
+
+    def destroy_node(self):
+
+        cmd = Twist()
+
+        self.cmd_pub.publish(cmd)
+
+        super().destroy_node()
 
 
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = RobotController()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+
+    try:
+
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+
+        pass
+
+    finally:
+
+        node.destroy_node()
+
+        if rclpy.ok():
+
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
+
     main()

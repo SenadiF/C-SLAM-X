@@ -27,6 +27,8 @@ setup(
         'console_scripts': ['frontier_explorer = auto_nav.frontier_explorer:main',
         'astar_planner = auto_nav.astar_planner:main',
         'pure_pursuit = auto_nav.pure_pursuit:main',
+        'robot_controller = auto_nav.robot_controller:main',
+        'robot_coordinator = auto_nav.robot_coordinator:main'
         ],
     },
 )

@@ -1,7 +1,7 @@
 ros2 run robot_odometry wheel_odometry_node
 ros2 launch robot_bringup static_tf.launch.py
-ros2 run robot_control time.py
-ros2 launch robot_localization_config robot_localization.launch.py
+ros2 run robot_control time_npde
+ros2 launch robot_localization_config localization.launch.py
 ros2 launch robot_localization_config slam.launch.py
 ros2 launch auto_nav custom_explore.launch.py
 

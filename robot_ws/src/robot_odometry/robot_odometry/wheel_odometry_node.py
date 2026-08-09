@@ -1,178 +1,406 @@
+import math
+
 import rclpy
 from rclpy.node import Node
+
 from std_msgs.msg import Int32MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion
-from tf2_ros import TransformBroadcaster
-from geometry_msgs.msg import TransformStamped
 
-
-import math
 from tf_transformations import quaternion_from_euler
+
 
 class WheelOdometryNode(Node):
 
     def __init__(self):
         super().__init__('wheel_odometry_node')
-        
 
-        
+        # ============================================================
+        # PARAMETERS
+        # ============================================================
 
-        #Parameters
-        self.declare_parameter('robot_name','robot1')
-        
-        self.declare_parameter('wheel_base',0.099)
+        self.declare_parameter('robot_name', 'robot1')
+
+        # Distance between left and right wheels
+        self.declare_parameter('wheel_base', 0.099)
+
+        # Calibrated encoder value
         self.declare_parameter('ticks_per_meter', 13313.0)
-        self.first_reading=True
-        
-        self.robot_name = self.get_parameter('robot_name').value
-        
-        self.wheel_base = self.get_parameter('wheel_base').value
-        self.ticks_per_meter = self.get_parameter('ticks_per_meter').value
-        self.tf_broadcaster = TransformBroadcaster(self)
-        #Encoder state 
+
+        # Encoder sign corrections
+        #
+        # Your previous implementation used:
+        # left  = negative encoder direction
+        # right = positive encoder direction
+        #
+        self.declare_parameter('left_encoder_sign', -1.0)
+        self.declare_parameter('right_encoder_sign', 1.0)
+
+        self.robot_name = self.get_parameter(
+            'robot_name'
+        ).value
+
+        self.wheel_base = float(
+            self.get_parameter('wheel_base').value
+        )
+
+        self.ticks_per_meter = float(
+            self.get_parameter('ticks_per_meter').value
+        )
+
+        self.left_sign = float(
+            self.get_parameter('left_encoder_sign').value
+        )
+
+        self.right_sign = float(
+            self.get_parameter('right_encoder_sign').value
+        )
+
+        # ============================================================
+        # STATE
+        # ============================================================
+
+        self.initialized = False
 
         self.prev_left_ticks = 0
         self.prev_right_ticks = 0
-        self.linear_velocity = 0.0
-        self.angular_velocity = 0.0
-        self.last_time = self.get_clock().now()
 
-        #Robot pose 
+        # Robot pose in odom frame
         self.x = 0.0
         self.y = 0.0
         self.theta = 0.0
-        #Topics 
-        
-        encoder_topic=(f'/{self.robot_name}/encoder')
-        odom_topic=(f'/{self.robot_name}/wheel_odom')
-        
-        #Subscriber 
-        
-        self.encoder_subscriber = self.create_subscription(Int32MultiArray, encoder_topic, self.encoder_callback, 10)
 
-        #Publisher
-        self.odom_publisher = self.create_publisher(Odometry, odom_topic, 10)
-        
-        #Encoder callback function
+        # Velocities
+        self.linear_velocity = 0.0
+        self.angular_velocity = 0.0
+
+        self.last_time = self.get_clock().now()
+
+        # ============================================================
+        # TOPICS
+        # ============================================================
+
+        encoder_topic = f'/{self.robot_name}/encoder'
+        odom_topic = f'/{self.robot_name}/wheel_odom'
+
+        self.encoder_subscriber = self.create_subscription(
+            Int32MultiArray,
+            encoder_topic,
+            self.encoder_callback,
+            10
+        )
+
+        self.odom_publisher = self.create_publisher(
+            Odometry,
+            odom_topic,
+            10
+        )
+
+        # ============================================================
+        # STARTUP INFORMATION
+        # ============================================================
+
+        self.get_logger().info(
+            'Wheel odometry node started.'
+        )
+
+        self.get_logger().info(
+            f'Robot: {self.robot_name}'
+        )
+
+        self.get_logger().info(
+            f'Wheel base: {self.wheel_base:.4f} m'
+        )
+
+        self.get_logger().info(
+            f'Ticks per meter: {self.ticks_per_meter:.2f}'
+        )
+
+        self.get_logger().info(
+            f'Encoder signs: L={self.left_sign}, '
+            f'R={self.right_sign}'
+        )
+
+    # ================================================================
+    # ENCODER CALLBACK
+    # ================================================================
+
     def encoder_callback(self, msg):
-        if self.first_reading:
-         self.prev_left_ticks = msg.data[0]
-         self.prev_right_ticks = msg.data[1]
-         self.last_time = self.get_clock().now()
-         self.first_reading = False
-         return
 
-        current_left_ticks = msg.data[0]
-        current_right_ticks = msg.data[1] 
-        print(f"Current Left Ticks: {current_left_ticks}, Current Right Ticks: {current_right_ticks}")
-          
-        left_tick_diff = current_left_ticks - self.prev_left_ticks
-        right_tick_diff = current_right_ticks - self.prev_right_ticks
+        # ------------------------------------------------------------
+        # Validate encoder message
+        # ------------------------------------------------------------
 
-        
+        if len(msg.data) < 2:
+            self.get_logger().warning(
+                'Encoder message does not contain two values.'
+            )
+            return
 
-        left_distance = -left_tick_diff /self.ticks_per_meter
-        right_distance = right_tick_diff /self.ticks_per_meter
+        current_left_ticks = int(msg.data[0])
+        current_right_ticks = int(msg.data[1])
 
-        distance = (left_distance + right_distance) / 2.0
-        delta_theta = (right_distance - left_distance) / self.wheel_base
         current_time = self.get_clock().now()
 
-        dt = (current_time - self.last_time).nanoseconds / 1e9
-        if dt>0:
-         self.linear_velocity = distance / dt
+        # ------------------------------------------------------------
+        # First encoder reading
+        # ------------------------------------------------------------
 
-         self.angular_velocity = delta_theta / dt
+        if not self.initialized:
 
-        self.x += distance * math.cos(self.theta + delta_theta / 2.0)
-        self.y += distance * math.sin(self.theta + delta_theta / 2.0)
+            self.prev_left_ticks = current_left_ticks
+            self.prev_right_ticks = current_right_ticks
+
+            self.last_time = current_time
+
+            self.initialized = True
+
+            self.get_logger().info(
+                f'Initial encoder values: '
+                f'L={current_left_ticks}, '
+                f'R={current_right_ticks}'
+            )
+
+            # Publish initial zero odometry
+            self.publish_odometry()
+
+            return
+
+        # ------------------------------------------------------------
+        # Encoder differences
+        # ------------------------------------------------------------
+
+        raw_left_diff = (
+            current_left_ticks -
+            self.prev_left_ticks
+        )
+
+        raw_right_diff = (
+            current_right_ticks -
+            self.prev_right_ticks
+        )
+
+        # Apply wheel direction signs
+        left_tick_diff = (
+            self.left_sign * raw_left_diff
+        )
+
+        right_tick_diff = (
+            self.right_sign * raw_right_diff
+        )
+
+        # ------------------------------------------------------------
+        # Time difference
+        # ------------------------------------------------------------
+
+        dt = (
+            current_time - self.last_time
+        ).nanoseconds / 1e9
+
+        if dt <= 0.0:
+            return
+
+        # ------------------------------------------------------------
+        # Convert encoder ticks to distance
+        # ------------------------------------------------------------
+
+        left_distance = (
+            left_tick_diff /
+            self.ticks_per_meter
+        )
+
+        right_distance = (
+            right_tick_diff /
+            self.ticks_per_meter
+        )
+
+        # ------------------------------------------------------------
+        # Differential drive equations
+        # ------------------------------------------------------------
+
+        distance = (
+            left_distance +
+            right_distance
+        ) / 2.0
+
+        delta_theta = (
+            right_distance -
+            left_distance
+        ) / self.wheel_base
+
+        # ------------------------------------------------------------
+        # Update pose
+        # ------------------------------------------------------------
+
+        theta_mid = (
+            self.theta +
+            delta_theta / 2.0
+        )
+
+        self.x += (
+            distance *
+            math.cos(theta_mid)
+        )
+
+        self.y += (
+            distance *
+            math.sin(theta_mid)
+        )
+
         self.theta += delta_theta
 
-        self.theta=math.atan2(math.sin(self.theta), math.cos(self.theta))  # Normalize theta to [-pi, pi]
+        # Normalize angle to [-pi, pi]
+        self.theta = math.atan2(
+            math.sin(self.theta),
+            math.cos(self.theta)
+        )
+
+        # ------------------------------------------------------------
+        # Update velocities
+        # ------------------------------------------------------------
+
+        self.linear_velocity = distance / dt
+
+        self.angular_velocity = delta_theta / dt
+
+        # ------------------------------------------------------------
+        # Save encoder state
+        # ------------------------------------------------------------
 
         self.prev_left_ticks = current_left_ticks
-        self.prev_right_ticks = current_right_ticks 
+        self.prev_right_ticks = current_right_ticks
+
         self.last_time = current_time
 
+        # ------------------------------------------------------------
+        # Publish
+        # ------------------------------------------------------------
+
         self.publish_odometry()
-        self.publish_tf()
+
+        # ------------------------------------------------------------
+        # Debug information
+        # ------------------------------------------------------------
+
+        self.get_logger().info(
+            f'L={current_left_ticks} '
+            f'R={current_right_ticks} | '
+            f'dL={left_tick_diff} '
+            f'dR={right_tick_diff} | '
+            f'd={distance:.4f} m | '
+            f'v={self.linear_velocity:.3f} m/s | '
+            f'w={self.angular_velocity:.3f} rad/s | '
+            f'pose=({self.x:.2f}, '
+            f'{self.y:.2f}, '
+            f'{self.theta:.2f})'
+        )
+
+    # ================================================================
+    # PUBLISH ODOMETRY
+    # ================================================================
 
     def publish_odometry(self):
 
-            msg=Odometry()
-            msg.header.stamp = self.get_clock().now().to_msg()
-            msg.header.frame_id = (
+        msg = Odometry()
+
+        msg.header.stamp = self.get_clock().now().to_msg()
+
+        msg.header.frame_id = (
             f'{self.robot_name}/odom'
         )
 
-            msg.child_frame_id = (
+        msg.child_frame_id = (
             f'{self.robot_name}/base_link'
         )
-            #Pose
-            msg.pose.pose.position.x = self.x
-            msg.pose.pose.position.y = self.y
-            msg.pose.pose.position.z = 0.0  
-            # covariance added for the uncertainty in the pose and twist estimation
-            msg.pose.covariance= [
- 0.01, 0,    0,    0,    0,    0,
-    0,    0.01, 0,    0,    0,    0,
-    0,    0,    999,  0,    0,    0,
-    0,    0,    0,    999,  0,    0,
-    0,    0,    0,    0,    999,  0,
-    0,    0,    0,    0,    0,    0.05
-]
-            msg.twist.covariance=msg.pose.covariance
-            q=quaternion_from_euler(0.0, 0.0, self.theta)
-            msg.pose.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
-            msg.twist.twist.linear.x = self.linear_velocity
-            msg.twist.twist.angular.z = self.angular_velocity
+
+        # ------------------------------------------------------------
+        # Pose
+        # ------------------------------------------------------------
+
+        msg.pose.pose.position.x = self.x
+        msg.pose.pose.position.y = self.y
+        msg.pose.pose.position.z = 0.0
+
+        q = quaternion_from_euler(
+            0.0,
+            0.0,
+            self.theta
+        )
+
+        msg.pose.pose.orientation = Quaternion(
+            x=q[0],
+            y=q[1],
+            z=q[2],
+            w=q[3]
+        )
+
+        # ------------------------------------------------------------
+        # Pose covariance
+        #
+        # x
+        # y
+        # yaw have useful covariance.
+        # z/roll/pitch are not estimated.
+        # ------------------------------------------------------------
+
+        msg.pose.covariance = [
+            0.01, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.01, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 999.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 999.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 999.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.05
+        ]
+
+        # ------------------------------------------------------------
+        # Twist
+        # ------------------------------------------------------------
+
+        msg.twist.twist.linear.x = (
+            self.linear_velocity
+        )
+
+        msg.twist.twist.linear.y = 0.0
+        msg.twist.twist.linear.z = 0.0
+
+        msg.twist.twist.angular.x = 0.0
+        msg.twist.twist.angular.y = 0.0
+
+        msg.twist.twist.angular.z = (
+            self.angular_velocity
+        )
+
+        msg.twist.covariance = [
+            0.01, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.01, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 999.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 999.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 999.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.05
+        ]
+
+        self.odom_publisher.publish(msg)
 
 
-
-            self.odom_publisher.publish(msg)
-    def publish_tf(self):
-
-       t = TransformStamped()
-
-       t.header.stamp = self.get_clock().now().to_msg()
-
-       t.header.frame_id = f'{self.robot_name}/odom'
-
-       t.child_frame_id = f'{self.robot_name}/base_link'
-
-
-       t.transform.translation.x = self.x
-       t.transform.translation.y = self.y
-       t.transform.translation.z = 0.0
-  
-
-       q = quaternion_from_euler(
-        0.0,
-        0.0,
-        self.theta
-    )
-
-       t.transform.rotation.x = q[0]
-       t.transform.rotation.y = q[1]
-       t.transform.rotation.z = q[2]
-       t.transform.rotation.w = q[3]
-
-
-       self.tf_broadcaster.sendTransform(t)
 def main(args=None):
 
-          rclpy.init(args=args)
+    rclpy.init(args=args)
 
-          node = WheelOdometryNode()
+    node = WheelOdometryNode()
 
-          rclpy.spin(node)
+    try:
+        rclpy.spin(node)
 
-          node.destroy_node()
+    except KeyboardInterrupt:
+        pass
 
-          rclpy.shutdown()
+    finally:
+        node.destroy_node()
 
+        # Prevent the "rcl_shutdown already called" error
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
-             main()
+    main()

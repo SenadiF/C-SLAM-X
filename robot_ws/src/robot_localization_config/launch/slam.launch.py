@@ -42,7 +42,10 @@ def generate_launch_description():
                    
                     parameters=[
                         slam_config
-                    ]
+                    ],
+                     remappings=[
+        ('map', 'map')
+    ]
                 ),
 
                 Node(

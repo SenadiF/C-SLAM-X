@@ -30,6 +30,9 @@ setup(
         'robot_controller = auto_nav.robot_controller:main',
         'robot_coordinator = auto_nav.robot_coordinator:main',
         'simple_controller = auto_nav.simple_controller:main',
+        'frontier_explorer_node = auto_nav.frontier:main',
+        'astar_node = auto_nav.astar:main ',
+        'pure_pursuit_node = auto_nav.pure_pursuit_node:main',
         ],
     },
 )

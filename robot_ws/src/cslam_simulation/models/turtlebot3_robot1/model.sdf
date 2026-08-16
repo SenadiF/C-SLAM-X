@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <sdf version="1.8">
-  <model name="turtlebot3_burger">
+  <model name="robot1">
     <pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>
 
     <link name="base_footprint"/>
@@ -137,7 +137,7 @@
         <visualize>true</visualize>
         <pose>-0.032 0 0.171 0 0 0</pose>
         <update_rate>5</update_rate>
-        <topic>scan</topic>
+        <topic>/robot1/scan</topic>
         <gz_frame_id>base_scan</gz_frame_id>
         <lidar>
           <scan>
@@ -393,7 +393,7 @@
   <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher"> 
     <topic>/robot1/joint_states</topic> 
     <joint>wheel_left_joint</joint> 
-    <joint>wheel_right_joint</joint> <
+    <joint>wheel_right_joint</joint> 
   </plugin>
 </model>
 </sdf>

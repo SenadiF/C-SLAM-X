@@ -1,4 +1,3 @@
-
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -11,6 +10,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+
     turtlebot3_gazebo_dir = get_package_share_directory(
         'turtlebot3_gazebo'
     )
@@ -19,7 +19,6 @@ def generate_launch_description():
         'cslam_simulation'
     )
 
-   
     robot1_model_path = os.path.join(
         cslam_simulation_dir,
         'models',
@@ -27,7 +26,6 @@ def generate_launch_description():
         'model.sdf'
     )
 
-    
     robot2_model_path = os.path.join(
         cslam_simulation_dir,
         'models',
@@ -35,14 +33,11 @@ def generate_launch_description():
         'model.sdf'
     )
 
-
     world_path = os.path.join(
         turtlebot3_gazebo_dir,
         'worlds',
         'turtlebot3_world.world'
     )
-
-
 
     urdf_path = os.path.join(
         turtlebot3_gazebo_dir,
@@ -74,12 +69,13 @@ def generate_launch_description():
         arguments=[
             '-name', 'robot1',
             '-file', robot1_model_path,
-            '-x', '0.0',
+            '-x', '5.0',
             '-y', '0.0',
             '-z', '0.01'
         ],
         output='screen'
     )
+
 
 
     robot2_spawn = Node(
@@ -94,7 +90,6 @@ def generate_launch_description():
         ],
         output='screen'
     )
-
     robot1_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -110,6 +105,8 @@ def generate_launch_description():
             'frame_prefix': 'robot1/'
         }]
     )
+
+
     robot2_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -136,6 +133,9 @@ def generate_launch_description():
         output='screen',
 
         arguments=[
+
+
+
 
             # Odometry
             '/robot1/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
@@ -174,6 +174,49 @@ def generate_launch_description():
         ]
     )
 
+
+
+
+    # Static TF: map -> robot1/odom
+
+    # map_to_robot1 = Node(
+    #     package='tf2_ros',
+    #     executable='static_transform_publisher',
+    #     name='map_to_robot1',
+    #     arguments=[
+    #         '--x', '0.0',
+    #         '--y', '0.0',
+    #         '--z', '0.0',
+    #         '--yaw', '0.0',
+    #         '--pitch', '0.0',
+    #         '--roll', '0.0',
+    #         '--frame-id', 'map',
+    #         '--child-frame-id', 'robot1/odom'
+    #     ],
+    #     output='screen'
+    # )
+
+
+    # Static TF: map -> robot2/odom
+
+    # map_to_robot2 = Node(
+    #     package='tf2_ros',
+    #     executable='static_transform_publisher',
+    #     name='map_to_robot2',
+    #     arguments=[
+    #         '--x', '1.5',
+    #         '--y', '0.0',
+    #         '--z', '0.0',
+    #         '--yaw', '0.0',
+    #         '--pitch', '0.0',
+    #         '--roll', '0.0',
+    #         '--frame-id', 'map',
+    #         '--child-frame-id', 'robot2/odom'
+    #     ],
+    #     output='screen'
+    # )
+
+
     return LaunchDescription([
 
         # Gazebo
@@ -188,6 +231,9 @@ def generate_launch_description():
         robot2_state_publisher,
 
         # Gazebo <--> ROS bridge
-        bridge
-    ])
+        bridge,
 
+        # Static TFs intentionally disabled
+        # map_to_robot1,
+        # map_to_robot2,
+    ])

@@ -9,7 +9,7 @@ Right Encoder A	-       GPIO 32
 Right Encoder B	-       GPIO 33	
 IMU SDA	        -       GPIO 21	 
 IMU SCL	        -       GPIO 22	
-LiDAR TX - ESP32 RX	GPIO 16	
+LiDAR TX - ESP32 RX	GPIO 16	 - RX2 (other board)
 LiDAR RX - ESP32 TX	GPIO 17	
 SD Card MOSI	-       GPIO 23	
 SD Card MISO	-       GPIO 19	

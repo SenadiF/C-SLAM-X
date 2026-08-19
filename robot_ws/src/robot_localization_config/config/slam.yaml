@@ -1,4 +1,4 @@
-/robot2/slam_toolbox:
+/robot1/slam_toolbox:
   ros__parameters:
     solver_plugin: solver_plugins::CeresSolver
     ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
@@ -8,10 +8,10 @@
     ceres_loss_function: None
 
     # ROS Parameters
-    odom_frame: robot2/odom
-    map_frame: robot2/map
-    base_frame: robot2/base_link
-    scan_topic: scan
+    odom_frame: robot1/odom
+    map_frame: robot1/map
+    base_frame: robot1/base_link
+    scan_topic: /robot1/scan
     mode: mapping #localization
     use_sim_time: false
 

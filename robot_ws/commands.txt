@@ -1,7 +1,10 @@
-ros2 run robot_odometry wheel_odometry_node
+ros2 run robot_odometry wheel_odometry_node --ros-args -p robot_name:=robot1
+ros2 run robot_odometry wheel_odometry_node --ros-args -p robot_name:=robot2
 ros2 launch robot_bringup static_tf.launch.py
 ros2 run robot_control time_npde
-ros2 launch robot_localization_config localization.launch.py
+
+ros2 launch robot_localization_config localization.launch.py namespace:=robot1
+ros2 launch robot_localization_config localization.launch.py namespace:=robot2
 ros2 launch robot_localization_config slam.launch.py
 ros2 launch my_navigation map_merge.launch.py
 ros2 run my_navigation frontier_explorer_node

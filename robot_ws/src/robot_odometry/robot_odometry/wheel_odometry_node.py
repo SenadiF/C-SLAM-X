@@ -15,9 +15,8 @@ class WheelOdometryNode(Node):
     def __init__(self):
         super().__init__('wheel_odometry_node')
 
-        # ============================================================
-        # PARAMETERS
-        # ============================================================
+
+
 
         self.declare_parameter('robot_name', 'robot1')
 
@@ -27,12 +26,6 @@ class WheelOdometryNode(Node):
         # Calibrated encoder value
         self.declare_parameter('ticks_per_meter', 13313.0)
 
-        # Encoder sign corrections
-        #
-        # Your previous implementation used:
-        # left  = negative encoder direction
-        # right = positive encoder direction
-        #
         self.declare_parameter('left_encoder_sign', -1.0)
         self.declare_parameter('right_encoder_sign', 1.0)
 
@@ -56,9 +49,8 @@ class WheelOdometryNode(Node):
             self.get_parameter('right_encoder_sign').value
         )
 
-        # ============================================================
-        # STATE
-        # ============================================================
+
+
 
         self.initialized = False
 
@@ -76,9 +68,8 @@ class WheelOdometryNode(Node):
 
         self.last_time = self.get_clock().now()
 
-        # ============================================================
-        # TOPICS
-        # ============================================================
+
+
 
         encoder_topic = f'/{self.robot_name}/encoder'
         odom_topic = f'/{self.robot_name}/wheel_odom'
@@ -96,9 +87,8 @@ class WheelOdometryNode(Node):
             10
         )
 
-        # ============================================================
-        # STARTUP INFORMATION
-        # ============================================================
+
+
 
         self.get_logger().info(
             'Wheel odometry node started.'
@@ -121,15 +111,13 @@ class WheelOdometryNode(Node):
             f'R={self.right_sign}'
         )
 
-    # ================================================================
-    # ENCODER CALLBACK
-    # ================================================================
+
+
 
     def encoder_callback(self, msg):
 
-        # ------------------------------------------------------------
-        # Validate encoder message
-        # ------------------------------------------------------------
+
+
 
         if len(msg.data) < 2:
             self.get_logger().warning(
@@ -142,9 +130,8 @@ class WheelOdometryNode(Node):
 
         current_time = self.get_clock().now()
 
-        # ------------------------------------------------------------
-        # First encoder reading
-        # ------------------------------------------------------------
+
+
 
         if not self.initialized:
 
@@ -166,9 +153,6 @@ class WheelOdometryNode(Node):
 
             return
 
-        # ------------------------------------------------------------
-        # Encoder differences
-        # ------------------------------------------------------------
 
         raw_left_diff = (
             current_left_ticks -
@@ -189,9 +173,7 @@ class WheelOdometryNode(Node):
             self.right_sign * raw_right_diff
         )
 
-        # ------------------------------------------------------------
-        # Time difference
-        # ------------------------------------------------------------
+
 
         dt = (
             current_time - self.last_time
@@ -200,9 +182,8 @@ class WheelOdometryNode(Node):
         if dt <= 0.0:
             return
 
-        # ------------------------------------------------------------
-        # Convert encoder ticks to distance
-        # ------------------------------------------------------------
+
+
 
         left_distance = (
             left_tick_diff /
@@ -214,9 +195,7 @@ class WheelOdometryNode(Node):
             self.ticks_per_meter
         )
 
-        # ------------------------------------------------------------
-        # Differential drive equations
-        # ------------------------------------------------------------
+       
 
         distance = (
             left_distance +
@@ -228,9 +207,7 @@ class WheelOdometryNode(Node):
             left_distance
         ) / self.wheel_base
 
-        # ------------------------------------------------------------
-        # Update pose
-        # ------------------------------------------------------------
+    
 
         theta_mid = (
             self.theta +
@@ -255,32 +232,28 @@ class WheelOdometryNode(Node):
             math.cos(self.theta)
         )
 
-        # ------------------------------------------------------------
-        # Update velocities
-        # ------------------------------------------------------------
+        
+
 
         self.linear_velocity = distance / dt
 
         self.angular_velocity = delta_theta / dt
 
-        # ------------------------------------------------------------
-        # Save encoder state
-        # ------------------------------------------------------------
 
         self.prev_left_ticks = current_left_ticks
         self.prev_right_ticks = current_right_ticks
 
         self.last_time = current_time
 
-        # ------------------------------------------------------------
-        # Publish
-        # ------------------------------------------------------------
+
+
+
 
         self.publish_odometry()
 
-        # ------------------------------------------------------------
-        # Debug information
-        # ------------------------------------------------------------
+    
+    
+    
 
         self.get_logger().info(
             f'L={current_left_ticks} '
@@ -295,9 +268,9 @@ class WheelOdometryNode(Node):
             f'{self.theta:.2f})'
         )
 
-    # ================================================================
-    # PUBLISH ODOMETRY
-    # ================================================================
+    
+    
+    
 
     def publish_odometry(self):
 
@@ -313,9 +286,6 @@ class WheelOdometryNode(Node):
             f'{self.robot_name}/base_link'
         )
 
-        # ------------------------------------------------------------
-        # Pose
-        # ------------------------------------------------------------
 
         msg.pose.pose.position.x = self.x
         msg.pose.pose.position.y = self.y
@@ -334,14 +304,6 @@ class WheelOdometryNode(Node):
             w=q[3]
         )
 
-        # ------------------------------------------------------------
-        # Pose covariance
-        #
-        # x
-        # y
-        # yaw have useful covariance.
-        # z/roll/pitch are not estimated.
-        # ------------------------------------------------------------
 
         msg.pose.covariance = [
             0.01, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -352,9 +314,9 @@ class WheelOdometryNode(Node):
             0.0, 0.0, 0.0, 0.0, 0.0, 0.05
         ]
 
-        # ------------------------------------------------------------
-        # Twist
-        # ------------------------------------------------------------
+    
+    
+    
 
         msg.twist.twist.linear.x = (
             self.linear_velocity

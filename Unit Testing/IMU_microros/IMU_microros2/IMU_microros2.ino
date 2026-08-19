@@ -13,6 +13,12 @@
 #include <geometry_msgs/msg/twist.h>   
 #include <std_msgs/msg/int32_multi_array.h>
 
+#include <SPI.h>
+#include <SD.h>
+
+#define SD_CS_PIN 5
+#define LOG_FILENAME "/buffer.bin"
+
 std_msgs__msg__Int32MultiArray encoder_msg;
 
 // Variables for P controller 
@@ -101,7 +107,178 @@ rcl_subscription_t cmd_vel_subscriber;
 rclc_executor_t executor;
 geometry_msgs__msg__Twist cmd_vel_msg;
 
+//State machine
+bool sdReady = false;
 
+enum RobotState { INITIALIZE, NORMAL_MODE, LOCAL_EXPLORATION, SYNC_MODE };
+RobotState currentState = INITIALIZE;
+
+unsigned long last_wifi_check = 0;
+const unsigned long WIFI_CHECK_PERIOD_MS = 500;
+
+// Log one write / read per cycle 
+struct LogRecord {
+  long left_ticks;
+  long right_ticks;
+  float ax, ay, az;
+  float gx, gy, gz;
+  uint16_t lidar[360];
+};
+
+const unsigned long LOG_PERIOD_MS = 100;   // matches the scan publish rate
+unsigned long last_log_time = 0;
+
+// SD setup ----
+bool setupSd() {
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println("SD init FAILED — local buffering disabled this session.");
+    sdReady = false;
+    return false;
+  }
+  Serial.println("SD card initialized.");
+  sdReady = true;
+  return true;
+}
+
+void logSensorDataToSD() {
+  if (!sdReady) return;
+  File f = SD.open(LOG_FILENAME, FILE_APPEND);
+  if (!f) return;
+
+  LogRecord record;
+  record.left_ticks = left_ticks;
+  record.right_ticks = right_ticks;
+  record.ax = accelData.accelX * G_TO_MS2;
+  record.ay = accelData.accelY * G_TO_MS2;
+  record.az = accelData.accelZ * G_TO_MS2;
+  record.gx = gyroData.gyroX * DEG_TO_RAD;
+  record.gy = gyroData.gyroY * DEG_TO_RAD;
+  record.gz = gyroData.gyroZ * DEG_TO_RAD;
+  memcpy(record.lidar, lidarDistances, sizeof(record.lidar));
+
+  f.write((uint8_t*)&record, sizeof(LogRecord));
+  f.close();
+}
+
+// Follow the gap implementation
+#define SAFE_DISTANCE_MM 400
+#define EXPLORE_SPEED_MS 0.30
+
+void followTheGap() {
+  int bestStart = 0, bestLen = 0, curStart = -1, curLen = 0;
+
+  for (int i = 0; i < 360; i++) {
+    bool clear = (lidarDistances[i] == 0) || (lidarDistances[i] > SAFE_DISTANCE_MM);
+    if (clear) {
+      if (curStart == -1) curStart = i;
+      curLen++;
+    } else {
+      if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+      curStart = -1; curLen = 0;
+    }
+  }
+  if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+
+  if (bestLen == 0) {
+    target_left_speed = 0; target_right_speed = 0;
+    driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, 0, LEFT_MOTOR_REVERSED);
+    driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, 0, RIGHT_MOTOR_REVERSED);
+    return;
+  }
+
+  int gapCenter = (bestStart + bestLen / 2) % 360;
+  float angleError = gapCenter;
+  if (angleError > 180) angleError -= 360;   // shortest turn direction
+
+  target_left_speed  = EXPLORE_SPEED_MS - (angleError * 0.0015);
+  target_right_speed = EXPLORE_SPEED_MS + (angleError * 0.0015);
+
+  driveMotor(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, target_left_speed, LEFT_MOTOR_REVERSED);
+  driveMotor(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, target_right_speed, RIGHT_MOTOR_REVERSED);
+}
+
+// replay buffered records once WiFi is back
+void uploadBufferedLogs() {
+  if (!sdReady) return;
+  File f = SD.open(LOG_FILENAME, FILE_READ);
+  if (!f) { Serial.println("No buffered log to upload."); return; }
+
+  Serial.println("Uploading buffered logs...");
+  LogRecord record;
+  int count = 0;
+  unsigned long fakeTime = millis();
+
+  while (f.available() >= (int)sizeof(LogRecord)) {
+    f.read((uint8_t*)&record, sizeof(LogRecord));
+
+    // Republish ticks through the SAME publisher as live data
+    encoder_msg.data.data[0] = record.left_ticks;
+    encoder_msg.data.data[1] = record.right_ticks;
+    rcl_publish(&encoder_publisher, &encoder_msg, NULL);
+
+    // Republish IMU through the SAME publisher
+    imu_msg.linear_acceleration.x = record.ax;
+    imu_msg.linear_acceleration.y = record.ay;
+    imu_msg.linear_acceleration.z = record.az;
+    imu_msg.angular_velocity.x = record.gx;
+    imu_msg.angular_velocity.y = record.gy;
+    imu_msg.angular_velocity.z = record.gz;
+    imu_msg.header.stamp.sec = 0;
+    imu_msg.header.stamp.nanosec = 0;
+    rcl_publish(&imu_publisher, &imu_msg, NULL);
+
+    // Republish the LiDAR snapshot through the SAME scan publisher/function
+    memcpy(lidarDistances, record.lidar, sizeof(record.lidar));
+    publishScan(fakeTime);
+    fakeTime += LOG_PERIOD_MS;
+
+    count++;
+    delay(10);   
+  }
+  f.close();
+  SD.remove(LOG_FILENAME);
+  Serial.print("Replayed records: "); Serial.println(count);
+}
+
+//state machine driver
+void updateStateMachine() {
+  if (millis() - last_wifi_check < WIFI_CHECK_PERIOD_MS) return;
+  last_wifi_check = millis();
+
+  bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+
+  switch (currentState) {
+    case INITIALIZE:
+      if (wifiConnected) currentState = NORMAL_MODE;
+      break;
+
+    case NORMAL_MODE:
+      if (!wifiConnected) {
+        Serial.println("WiFi lost -> LOCAL_EXPLORATION");
+        stopMotors();
+        currentState = LOCAL_EXPLORATION;
+      }
+      break;
+
+    case LOCAL_EXPLORATION:
+      if (wifiConnected) {
+        Serial.println("WiFi back -> SYNC_MODE");
+        currentState = SYNC_MODE;
+      } else {
+        followTheGap();
+        if (millis() - last_log_time >= LOG_PERIOD_MS) {
+          last_log_time = millis();
+          logSensorDataToSD();
+        }
+      }
+      break;
+
+    case SYNC_MODE:
+      uploadBufferedLogs();
+      currentState = NORMAL_MODE;
+      break;
+  }
+}
 
 const uint32_t PUBLISH_PERIOD_MS = 10;
 unsigned long last_publish_time = 0;
@@ -248,7 +425,7 @@ void setupLidar() {
   lidar.setLogLevel(LidarLogLevel::OFF);
   lidar.begin();
 
-  rosidl_runtime_c__String__assign(&scan_msg.header.frame_id, "robot1/lidar_link");
+  rosidl_runtime_c__String__assign(&scan_msg.header.frame_id, "robot2/lidar_link");
   scan_msg.ranges.data = (float *)malloc(360 * sizeof(float));
   scan_msg.ranges.size = 360;
   scan_msg.ranges.capacity = 360;
@@ -336,7 +513,7 @@ void setup()
     Serial.println("r1");
     rclc_support_init(&support, 0, NULL, &allocator);
     Serial.println("r2");
-    rclc_node_init_default(&node, "imu_node", "robot1", &support);
+    rclc_node_init_default(&node, "imu_node", "robot2", &support);
     Serial.println("r3");
     rclc_publisher_init_default(
         &imu_publisher,
@@ -359,7 +536,10 @@ void setup()
     encoder_msg.data.data = (int32_t *)malloc(2 * sizeof(int32_t));
     encoder_msg.data.size = 2;
     encoder_msg.data.capacity = 2;
-
+    
+    
+    setupSd();
+    Serial.println("SD Initialized");
     
     rclc_subscription_init_default(
         &cmd_vel_subscriber,
@@ -377,10 +557,13 @@ void loop()
     rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
     // updateMotorPID();   // PID DISABLED FOR TESTING
     lidar.readData(LidarSerial);
+    updateStateMachine();
 
-    // Basic watchdog, since PID isn't handling this anymore
-    if (millis() - last_cmd_vel_time > CMD_VEL_TIMEOUT_MS) {
-      stopMotors();
+    // Normal mode 
+    if (currentState == NORMAL_MODE) {
+      if (millis() - last_cmd_vel_time > CMD_VEL_TIMEOUT_MS) {
+        stopMotors();
+      }
     }
 
     unsigned long current_time = millis();
@@ -429,5 +612,8 @@ void loop()
 
     if (current_time - last_scan_publish_time >= SCAN_PUBLISH_PERIOD_MS) {
         last_scan_publish_time = current_time;
-        publishScan(current_time);}
+        if (currentState != LOCAL_EXPLORATION) {  
+          publishScan(current_time);
+        }
+    }
 }

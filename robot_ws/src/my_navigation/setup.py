@@ -12,6 +12,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/single_robot_nav.launch.py']),
         ('share/' + package_name + '/launch', ['launch/multi_robot_nav.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/map_merge.launch.py']),
+        ('share/' + package_name + '/config', ['config/map_merge_params.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

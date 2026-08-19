@@ -9,7 +9,7 @@
 
     # ROS Parameters
     odom_frame: robot2/odom
-    map_frame: robot1/map
+    map_frame: robot2/map
     base_frame: robot2/base_link
     scan_topic: scan
     mode: mapping #localization

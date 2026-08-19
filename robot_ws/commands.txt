@@ -3,7 +3,11 @@ ros2 launch robot_bringup static_tf.launch.py
 ros2 run robot_control time_npde
 ros2 launch robot_localization_config localization.launch.py
 ros2 launch robot_localization_config slam.launch.py
-ros2 launch auto_nav custom_explore.launch.py
+ros2 launch my_navigation map_merge.launch.py
+ros2 run my_navigation frontier_explorer_node
+ros2 run my_navigation astar_node
+ros2 run my_navigation pure_pursuit_node
+ros2 run my_navigation cmd_vel_relay_node
 
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/robot1/cmd_vel
 

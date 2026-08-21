@@ -40,6 +40,10 @@ def generate_launch_description():
 
                     parameters=[
                         slam_config_robot1
+                    ],
+                    remappings=[
+                        ('/map', 'map'),
+                        ('/map_metadata', 'map_metadata')
                     ]
                 ),
 
@@ -75,6 +79,10 @@ def generate_launch_description():
 
                     parameters=[
                         slam_config_robot2
+                    ],
+                    remappings=[
+                        ('/map', 'map'),
+                        ('/map_metadata', 'map_metadata')
                     ]
                 ),
 

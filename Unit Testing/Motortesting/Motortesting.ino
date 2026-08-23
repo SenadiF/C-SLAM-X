@@ -1,63 +1,31 @@
-#include <Wire.h>
-#include <FastIMU.h>
+#define LEFT_IN1   2
+#define LEFT_IN2   15
+#define RIGHT_IN3  27
+#define RIGHT_IN4  14
 
-#define IMU_ADDRESS 0x69
+void forward()
+{
+  // Left motor forward
+  digitalWrite(LEFT_IN1,LOW);
+  digitalWrite(LEFT_IN2,HIGH);
 
-BMI160 IMU;
-calData calib = {0};
-
-AccelData accelData;
-GyroData gyroData;
-
-void setup() {
-  Serial.begin(115200);
-  delay(2000);
-
-  Serial.println("Starting BMI160 Test...");
-
-  Wire.begin(21, 22);
-  Wire.setClock(100000);
-
-  int err = IMU.init(calib, IMU_ADDRESS);
-
-  if (err != 0) {
-    Serial.print("IMU init failed! Error: ");
-    Serial.println(err);
-
-    while (1) {
-      delay(1000);
-    }
-  }
-
-  Serial.println("BMI160 initialized successfully!");
+  // Right motor forward
+  digitalWrite(RIGHT_IN3,HIGH);
+  digitalWrite(RIGHT_IN4, LOW);
 }
 
-void loop() {
+void setup()
+{
+  Serial.begin(115200);
 
-  IMU.update();
+  pinMode(LEFT_IN1, OUTPUT);
+  pinMode(LEFT_IN2, OUTPUT);
+  pinMode(RIGHT_IN3, OUTPUT);
+  pinMode(RIGHT_IN4, OUTPUT);
 
-  IMU.getAccel(&accelData);
-  IMU.getGyro(&gyroData);
+  forward();
+}
 
-  Serial.println("----------------");
-
-  Serial.print("Accel X (g): ");
-  Serial.println(accelData.accelX, 4);
-
-  Serial.print("Accel Y (g): ");
-  Serial.println(accelData.accelY, 4);
-
-  Serial.print("Accel Z (g): ");
-  Serial.println(accelData.accelZ, 4);
-
-  Serial.print("Gyro X (deg/s): ");
-  Serial.println(gyroData.gyroX, 4);
-
-  Serial.print("Gyro Y (deg/s): ");
-  Serial.println(gyroData.gyroY, 4);
-
-  Serial.print("Gyro Z (deg/s): ");
-  Serial.println(gyroData.gyroZ, 4);
-
-  delay(500);
+void loop()
+{
 }

@@ -95,6 +95,7 @@ class FrontierExplorer(Node):
             '/robot1/frontier_goals',
             10
         )
+
         self.robot2_goal_pub = self.create_publisher(
             PoseArray,
             '/robot2/frontier_goals',
@@ -199,6 +200,7 @@ class FrontierExplorer(Node):
             )
 
         self.robot2_goals = []
+
 #Robot 1 planning failed callback function to handle the case when robot 1 fails to plan a path to its assigned frontier goal. It records the failure and clears the robot's goals.
     def robot1_planning_failed_callback(self, msg):
 
@@ -236,6 +238,7 @@ class FrontierExplorer(Node):
             )
 
             self.robot2_goals = []
+
 #Record the failed frontiers
     def _record_failure(
         self,
@@ -272,15 +275,16 @@ class FrontierExplorer(Node):
 
         if (
             self.robot1_x is None
-            or self.robot2_x is None
+            and self.robot2_x is None
         ):
 
             self.get_logger().info(
-                'Waiting for both robot positions...'
+                'Waiting for at least one robot position...'
             )
 
             return
-#Find the frontier cells 
+
+#Find the frontier cells
 
         frontier_cells = (
             self.find_frontier_cells()
@@ -293,12 +297,12 @@ class FrontierExplorer(Node):
             )
 
             return
-#Cluster 
+
+#Cluster
 
         clusters = self.cluster_frontiers(
             frontier_cells
         )
-
 
         frontier_points = []
 
@@ -329,36 +333,44 @@ class FrontierExplorer(Node):
 
             return
 
-       
-        # REMOVE FRONTIERS TOO CLOSE TO ROBOTS  
+        # REMOVE FRONTIERS TOO CLOSE TO ROBOTS
         useful_frontiers = []
 
         for frontier in frontier_points:
 
             x, y = frontier
 
-            distance_robot1 = self.distance(
-                self.robot1_x,
-                self.robot1_y,
-                x,
-                y
-            )
+            robot_distances = []
 
-            distance_robot2 = self.distance(
-                self.robot2_x,
-                self.robot2_y,
-                x,
-                y
-            )
+            if self.robot1_x is not None:
 
-            # A frontier is useful if it is sufficiently far from
-            # at least the robot that will use it.
-            if (
-                distance_robot1 >=
-                self.minimum_frontier_distance
-                or
-                distance_robot2 >=
-                self.minimum_frontier_distance
+                distance_robot1 = self.distance(
+                    self.robot1_x,
+                    self.robot1_y,
+                    x,
+                    y
+                )
+
+                robot_distances.append(
+                    distance_robot1
+                )
+
+            if self.robot2_x is not None:
+
+                distance_robot2 = self.distance(
+                    self.robot2_x,
+                    self.robot2_y,
+                    x,
+                    y
+                )
+
+                robot_distances.append(
+                    distance_robot2
+                )
+
+            if any(
+                distance >= self.minimum_frontier_distance
+                for distance in robot_distances
             ):
 
                 useful_frontiers.append(
@@ -372,7 +384,8 @@ class FrontierExplorer(Node):
             )
 
             return
-        #currently reserved frontiers 
+
+        #currently reserved frontiers
 
         reserved = []
 
@@ -387,9 +400,13 @@ class FrontierExplorer(Node):
             reserved.append(
                 self.robot2_goals[0]
             )
-#Assign robot 1 frontiers 
 
-        if not self.robot1_goals:
+#Assign robot 1 frontiers
+
+        if (
+            self.robot1_x is not None
+            and not self.robot1_goals
+        ):
 
             robot1_frontier = (
                 self.select_frontier_for_robot(
@@ -417,8 +434,13 @@ class FrontierExplorer(Node):
                 )
 
                 self.publish_robot1_goals()
-#Assign robot 2 frontiers 
-        if not self.robot2_goals:
+
+#Assign robot 2 frontiers
+
+        if (
+            self.robot2_x is not None
+            and not self.robot2_goals
+        ):
 
             robot2_frontier = (
                 self.select_frontier_for_robot(
@@ -509,6 +531,7 @@ class FrontierExplorer(Node):
         )
 
         return candidates[0][1]
+
 #Check from the neighboring cells if the frontier is free and return the snapped point in world coordinates. If no free cell is found within a certain radius, return None.
 
     def snap_to_free(
@@ -602,7 +625,7 @@ class FrontierExplorer(Node):
         return None
 
     # FIND FRONTIER CELLS
-   
+
     def find_frontier_cells(self):
 
         width = (
@@ -652,6 +675,7 @@ class FrontierExplorer(Node):
                     )
 
         return frontier_cells
+
 #Cluster the frontier cells based on their proximity to each other. Cells that are close together  are grouped into clusters. Each cluster represents a potential frontier area for exploration.
 
     def cluster_frontiers(
@@ -739,6 +763,7 @@ class FrontierExplorer(Node):
                 )
 
         return clusters
+
 #Get the center of a cluster of frontier cells by calculating the average position of all cells in the cluster. The center is then converted from grid coordinates to world coordinates based on the map's resolution and origin.
 
     def cluster_center(
@@ -794,6 +819,7 @@ class FrontierExplorer(Node):
             world_x,
             world_y
         )
+
 #Failed frontiers are those that have been attempted multiple times without success. This function checks if a given frontier has failed based on the number of attempts recorded in the failed_frontiers dictionary. If the number of attempts exceeds the maximum allowed retries, the frontier is considered failed.
 
     def is_failed(
@@ -827,7 +853,7 @@ class FrontierExplorer(Node):
         return False
 
     # DISTANCE
-  
+
     def distance(
         self,
         x1,
@@ -842,9 +868,8 @@ class FrontierExplorer(Node):
             (y2 - y1) ** 2
         )
 
-  
     # PUBLISH ROBOT 1 GOAL
-   
+
     def publish_robot1_goals(
         self
     ):

@@ -72,8 +72,8 @@ GyroData gyroData;
 #define RIGHT_MOTOR_IN1 27
 #define RIGHT_MOTOR_IN2 14
 
-#define LEFT_MOTOR_REVERSED  true
-#define RIGHT_MOTOR_REVERSED false
+#define LEFT_MOTOR_REVERSED  false
+#define RIGHT_MOTOR_REVERSED true
 
 
 #define LEFT_PWM_CH1 0

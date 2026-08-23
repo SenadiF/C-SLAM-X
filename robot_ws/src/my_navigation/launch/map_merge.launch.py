@@ -23,21 +23,16 @@ def generate_launch_description():
 
     declare_namespace_argument = DeclareLaunchArgument(
         "namespace",
-        default_value="/",
+        default_value="/", # Keep global so it manages the world map frame
         description="Namespace for the map merge node",
     )
 
     declare_known_init_poses_argument = DeclareLaunchArgument(
         "known_init_poses",
-        default_value="false",
+        default_value="false", # Unknown initial poses
         description="Known initial poses of the robots",
     )
 
-    
-    remappings = [
-        ("/tf", "tf"),
-        ("/tf_static", "tf_static")
-    ]
 
     node = Node(
         package="multirobot_map_merge",
@@ -49,10 +44,12 @@ def generate_launch_description():
             {
                 "use_sim_time": False,
                 "known_init_poses": known_init_poses,
+                "world_frame": "map",        
+                "robot_map_frame": "map",  
+                "publish_tf": True,        
             }
         ],
         output="screen",
-        remappings=remappings,
     )
 
     ld.add_action(declare_known_init_poses_argument)

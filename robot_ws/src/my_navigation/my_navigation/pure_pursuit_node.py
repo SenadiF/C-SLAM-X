@@ -28,7 +28,7 @@ class PurePursuit(Node):
 
         self.declare_parameter(
             'linear_speed',
-            0.15
+            0.6
         )
 
         self.declare_parameter(

@@ -661,7 +661,7 @@ class AStarPlanner(Node):
                 # Unknown is treated as unsafe.
                
 
-                if value != 0:
+                if value >50:
 
                     return False
 

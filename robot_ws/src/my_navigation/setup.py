@@ -28,7 +28,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-             'frontier_explorer_node = my_navigation.frontier1:main',
+             'frontier_explorer_node = my_navigation.frontier:main',
               'astar_node = my_navigation.astar:main ',
               'pure_pursuit_node = my_navigation.pure_pursuit_node:main',
               'cmd_vel_relay_node = my_navigation.cmd_vel_relay:main',

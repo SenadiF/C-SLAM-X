@@ -29,7 +29,7 @@ def generate_launch_description():
 
     declare_known_init_poses_argument = DeclareLaunchArgument(
         "known_init_poses",
-        default_value="false", # Unknown initial poses
+        default_value="true", # Known initial poses
         description="Known initial poses of the robots",
     )
 

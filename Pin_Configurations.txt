@@ -1,8 +1,8 @@
 
 Left Motor IN1 - 	GPIO 2
 Left Motor IN2 -	GPIO 15
-Right Motor IN3-	GPIO 27	
-Right Motor IN4-	GPIO 14	
+Right Motor IN3-	GPIO 27	-14 (robot1)
+Right Motor IN4-	GPIO 14	- 27
 Left Encoder A -        GPIO 4	
 Left Encoder B -        GPIO 13	
 Right Encoder A	-       GPIO 32	

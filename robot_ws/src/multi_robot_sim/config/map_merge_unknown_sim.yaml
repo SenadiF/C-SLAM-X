@@ -1,0 +1,24 @@
+map_merge:
+  ros__parameters:
+    use_sim_time: true
+    merging_rate: 4.0
+    discovery_rate: 0.05
+    # Re-running ORB feature matching every 2s (0.5 Hz) while the maps are
+    # still small/sparse early in exploration lets successive attempts find
+    # different candidate alignments that each clear the confidence
+    # threshold - every time a new one wins, the merged /map snaps to it
+    # (visible in RViz as the whole grid jumping). The transform between two
+    # robots' map frames doesn't actually change once found, so there's no
+    # need to keep re-challenging it this often - dropping this to once
+    # every 20s gives the maps time to grow more detailed between attempts,
+    # which makes each individual estimate more stable.
+    estimation_rate: 0.05
+    estimation_confidence: 1.0
+    robot_namespace: "robot"
+    robot_map_topic: map
+    robot_map_updates_topic: map_updates
+    merged_map_topic: map
+    robot_map_frame: map
+    world_frame: map
+    publish_tf: true
+    known_init_poses: false

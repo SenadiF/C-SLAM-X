@@ -1,0 +1,138 @@
+<?xml version="1.0"?>
+<robot name="sim_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="robot_name" default="robot1"/>
+  <xacro:property name="robot_name" value="$(arg robot_name)"/>
+
+  <!-- ============ BASE ============ -->
+  <link name="${robot_name}/base_link">
+    <visual>
+      <geometry><box size="0.20 0.16 0.08"/></geometry>
+      <material name="grey"><color rgba="0.6 0.6 0.6 1"/></material>
+    </visual>
+    <collision>
+      <geometry><box size="0.20 0.16 0.08"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- ============ WHEELS ============ -->
+  <xacro:macro name="wheel" params="side y">
+    <link name="${robot_name}/${side}_wheel">
+      <visual>
+        <origin rpy="1.5708 0 0"/>
+        <geometry><cylinder radius="0.03" length="0.02"/></geometry>
+        <material name="black"><color rgba="0.1 0.1 0.1 1"/></material>
+      </visual>
+      <collision>
+        <origin rpy="1.5708 0 0"/>
+        <geometry><cylinder radius="0.03" length="0.02"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="0.05"/>
+        <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+      </inertial>
+    </link>
+    <joint name="${robot_name}/${side}_wheel_joint" type="continuous">
+      <parent link="${robot_name}/base_link"/>
+      <child link="${robot_name}/${side}_wheel"/>
+      <origin xyz="0 ${y} -0.02" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel side="left" y="0.09"/>
+  <xacro:wheel side="right" y="-0.09"/>
+
+  <!-- Caster (fixed, purely for stability in sim) -->
+  <link name="${robot_name}/caster">
+    <visual><geometry><sphere radius="0.015"/></geometry></visual>
+    <collision><geometry><sphere radius="0.015"/></geometry></collision>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+  <joint name="${robot_name}/caster_joint" type="fixed">
+    <parent link="${robot_name}/base_link"/>
+    <child link="${robot_name}/caster"/>
+    <origin xyz="0.08 0 -0.035" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============ LIDAR ============ -->
+  <link name="${robot_name}/lidar_link">
+    <visual><geometry><cylinder radius="0.02" length="0.03"/></geometry></visual>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+  <joint name="${robot_name}/lidar_joint" type="fixed">
+    <parent link="${robot_name}/base_link"/>
+    <child link="${robot_name}/lidar_link"/>
+    <origin xyz="0 0 0.08" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============ IMU ============ -->
+  <link name="${robot_name}/imu_link"/>
+  <joint name="${robot_name}/imu_joint" type="fixed">
+    <parent link="${robot_name}/base_link"/>
+    <child link="${robot_name}/imu_link"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============ GAZEBO PLUGINS ============ -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>${robot_name}/left_wheel_joint</left_joint>
+      <right_joint>${robot_name}/right_wheel_joint</right_joint>
+      <wheel_separation>0.18</wheel_separation>
+      <wheel_radius>0.03</wheel_radius>
+      <topic>/${robot_name}/cmd_vel</topic>
+      <odom_topic>/${robot_name}/odom_sim</odom_topic>
+      <tf_topic>/${robot_name}/tf_sim</tf_topic>
+      <frame_id>${robot_name}/odom</frame_id>
+      <child_frame_id>${robot_name}/base_link</child_frame_id>
+      <odom_publish_frequency>20</odom_publish_frequency>
+    </plugin>
+
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/${robot_name}/joint_states</topic>
+    </plugin>
+  </gazebo>
+
+  <gazebo reference="${robot_name}/lidar_link">
+    <sensor name="${robot_name}_lidar" type="gpu_lidar">
+      <topic>/${robot_name}/scan_sim</topic>
+      <update_rate>10</update_rate>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <min_angle>0</min_angle>
+            <max_angle>6.28318530718</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.05</min>
+          <max>12.0</max>
+        </range>
+      </lidar>
+      <always_on>true</always_on>
+      <visualize>false</visualize>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="${robot_name}/imu_link">
+    <sensor name="${robot_name}_imu" type="imu">
+      <topic>/${robot_name}/imu_sim</topic>
+      <update_rate>50</update_rate>
+      <always_on>true</always_on>
+    </sensor>
+  </gazebo>
+
+</robot>

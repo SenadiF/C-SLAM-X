@@ -40,6 +40,32 @@ class FrontierExplorer(Node):
             0.60
         )
 
+        # Must match astar_planner's obstacle_inflation_radius - otherwise
+        # this picks goals that are bare-free but still fall inside A*'s
+        # safety margin near a wall, and A* rejects every one of them.
+        self.declare_parameter(
+            'obstacle_inflation_radius',
+            0.15
+        )
+
+        self.obstacle_inflation_radius = self.get_parameter(
+            'obstacle_inflation_radius'
+        ).value
+
+        # Loop-closure corrections mean the map keeps subtly changing even
+        # once real exploration is done, so "zero frontier cells left" is
+        # too strict a stop condition to ever reliably trigger. Stop once
+        # this fraction of the map is known (occupied or free), matching
+        # the ss stack's own is_exploration_complete threshold.
+        self.declare_parameter(
+            'exploration_complete_threshold',
+            0.90
+        )
+
+        self.exploration_complete_threshold = self.get_parameter(
+            'exploration_complete_threshold'
+        ).value
+
         self.cluster_distance = self.get_parameter(
             'frontier_cluster_distance'
         ).value
@@ -68,6 +94,10 @@ class FrontierExplorer(Node):
 
         self.map_msg = None
         self.failed_frontiers = {}
+
+        # Latched once true - a map that briefly dips back under the
+        # threshold from loop-closure jitter shouldn't resume exploring.
+        self.exploration_complete = False
 
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -246,10 +276,33 @@ class FrontierExplorer(Node):
         permanent=False
     ):
 
-        key = (
-            round(frontier[0], 2),
-            round(frontier[1], 2)
-        )
+        # Merge into an existing nearby failure bucket if one is close by,
+        # so a cluster center that jitters slightly cycle to cycle (normal
+        # as the map fills in) still accumulates toward the same retry
+        # budget instead of each variant getting a fresh one.
+        key = None
+
+        for existing_key in self.failed_frontiers:
+
+            if (
+                self.distance(
+                    frontier[0],
+                    frontier[1],
+                    existing_key[0],
+                    existing_key[1]
+                )
+                < 0.30
+            ):
+
+                key = existing_key
+                break
+
+        if key is None:
+
+            key = (
+                round(frontier[0], 2),
+                round(frontier[1], 2)
+            )
 
         if permanent:
 
@@ -264,6 +317,9 @@ class FrontierExplorer(Node):
             )
 
     def explore(self):
+
+        if self.exploration_complete:
+            return
 
         if self.map_msg is None:
 
@@ -280,6 +336,23 @@ class FrontierExplorer(Node):
 
             self.get_logger().info(
                 'Waiting for at least one robot position...'
+            )
+
+            return
+
+        known_ratio = self.known_map_ratio()
+
+        if known_ratio >= self.exploration_complete_threshold:
+
+            self.exploration_complete = True
+
+            self.robot1_goals = []
+            self.robot2_goals = []
+
+            self.get_logger().info(
+                f'Exploration complete! {known_ratio * 100:.1f}% of map known '
+                f'(threshold {self.exploration_complete_threshold * 100:.0f}%). '
+                f'No further frontier goals will be assigned.'
             )
 
             return
@@ -568,6 +641,13 @@ class FrontierExplorer(Node):
             / resolution
         )
 
+        # Same inflation disc check as astar_planner's is_free, so we never
+        # hand it a goal it's just going to reject.
+        inflation_cells = max(
+            1,
+            int(math.ceil(self.obstacle_inflation_radius / resolution))
+        )
+
         def is_free(x, y):
 
             if (
@@ -579,10 +659,32 @@ class FrontierExplorer(Node):
 
                 return False
 
-            return (
-                data[y * width + x]
-                == 0
-            )
+            if data[y * width + x] != 0:
+                return False
+
+            for dx in range(-inflation_cells, inflation_cells + 1):
+
+                for dy in range(-inflation_cells, inflation_cells + 1):
+
+                    if math.sqrt(dx * dx + dy * dy) > inflation_cells:
+                        continue
+
+                    nx, ny = x + dx, y + dy
+
+                    if (
+                        nx < 0
+                        or nx >= width
+                        or ny < 0
+                        or ny >= height
+                    ):
+                        return False
+
+                    value = data[ny * width + nx]
+
+                    if value > 50 or value == -1:
+                        return False
+
+            return True
 
         if is_free(gx, gy):
 
@@ -819,6 +921,23 @@ class FrontierExplorer(Node):
             world_x,
             world_y
         )
+
+    # Fraction of map cells that are known (occupied or free) rather than
+    # unknown (-1). Used as the exploration-complete stop condition instead
+    # of "zero frontier cells left", which live SLAM re-optimization makes
+    # too strict to ever reliably hit exactly.
+    def known_map_ratio(self):
+
+        data = self.map_msg.data
+
+        total = len(data)
+
+        if total == 0:
+            return 0.0
+
+        known = sum(1 for cell in data if cell != -1)
+
+        return known / total
 
 #Failed frontiers are those that have been attempted multiple times without success. This function checks if a given frontier has failed based on the number of attempts recorded in the failed_frontiers dictionary. If the number of attempts exceeds the maximum allowed retries, the frontier is considered failed.
 

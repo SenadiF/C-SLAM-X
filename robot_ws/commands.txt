@@ -12,6 +12,48 @@ ros2 run my_navigation astar_node
 ros2 run my_navigation pure_pursuit_node
 ros2 run my_navigation cmd_vel_relay_node
 
+ros2 launch my_navigation map_merge.launch.py known_init_poses:=true   # like sim's merge_mode:=known
+ros2 launch my_navigation map_merge.launch.py known_init_poses:=false  # like sim's merge_mode:=unknown
+
+# third map-merge comparison method: skip map_merge.launch.py entirely and
+# run this instead (subscribes to /robot1/map + /robot2/map directly,
+# broadcasts a TF aligning them - like sim's merge_mode:=ransac_icp)
+ros2 run my_navigation ransac_icp_map_aligner
+
+
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/robot1/cmd_vel
 
-ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps
+ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03
+
+
+ros2 run ss multirobot_slam_node
+ros2 run ss robot_controller_node
+ros2 run ss robot_coordinator_node
+
+
+map merger log checking  -  
+
+ros2 run multirobot_map_merge map_merge --ros-args --log-level debug
+
+ros2 launch robot_localization_config nav2.launch.py
+ros2 run explore_lite explore --ros-args \
+  -r __ns:=/robot1 \
+  -p robot_base_frame:=robot1/base_link \
+  -p costmap_topic:=global_costmap/costmap \
+  -p costmap_updates_topic:=global_costmap/costmap_updates \
+  -p min_frontier_size:=0.5
+
+
+SIMULATION (Gazebo, two robots, no hardware needed) -
+
+# build once (or after any code change)
+colcon build --packages-select ss multi_robot_sim my_navigation robot_localization_config
+source install/setup.bash
+
+# your own nav stack (frontier_explorer / astar / pure_pursuit) - one launch does everything:
+ros2 launch multi_robot_sim multi_robot_sim.launch.py merge_mode:=known
+# merge_mode:=unknown       -> multirobot_map_merge's own feature-matching merge
+# merge_mode:=ransac_icp    -> your own RANSAC+ICP map aligner
+
+# ss baseline stack (multirobot_slam / robot_coordinator / robot_controller) - one launch does everything:
+ros2 launch multi_robot_sim baseline_sim.launch.py

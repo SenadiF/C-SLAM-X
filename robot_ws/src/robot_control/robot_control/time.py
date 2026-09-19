@@ -9,6 +9,7 @@ class Restamper(Node):
         super().__init__('restamper')
 
 
+
         self.robot1_scan_sub = self.create_subscription(
             LaserScan,
             '/robot1/scan_raw',
@@ -34,8 +35,6 @@ class Restamper(Node):
             '/robot1/imu',
             10
         )
-
-
 
         self.robot2_scan_sub = self.create_subscription(
             LaserScan,
@@ -64,13 +63,8 @@ class Restamper(Node):
         )
 
         self.get_logger().info(
-            'Restamper started for robot1 and robot2'
+            'Restamper started for robot1 and robot2 (RELIABLE QoS)'
         )
-
-
-
-
-
 
     def robot1_scan_callback(self, msg):
         msg.header.stamp = self.get_clock().now().to_msg()

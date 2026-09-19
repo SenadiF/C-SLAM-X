@@ -9,10 +9,11 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseArray
 from geometry_msgs.msg import PoseStamped
 
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32
 
 import math
 import heapq
+import time
 
 
 class AStarPlanner(Node):
@@ -33,6 +34,22 @@ class AStarPlanner(Node):
         self.obstacle_inflation_radius = self.get_parameter(
             'obstacle_inflation_radius'
         ).value
+
+        # If a goal is unreachable (blocked/inflated), find_nearest_free can
+        # snap both the robot's start cell AND the goal cell to the same
+        # small isolated safe pocket near the robot's current position.
+        # a_star then trivially reports start==goal as "success" right where
+        # the robot already is, even though it's nowhere near the real goal.
+        # Reject that as a failure unless the robot genuinely was already
+        # this close to the requested goal.
+        self.declare_parameter(
+            'same_cell_snap_tolerance',
+            0.3
+        )
+
+        self.same_cell_snap_tolerance = self.get_parameter(
+            'same_cell_snap_tolerance'
+        ).value
 #Robot 1 currect position 
 
         self.robot1_x = None
@@ -47,6 +64,14 @@ class AStarPlanner(Node):
 
         self.robot1_current_goal = None
         self.robot2_current_goal = None
+
+        # Once a goal has been successfully planned for, don't keep
+        # re-publishing a path for it every cycle - pure_pursuit already
+        # has what it needs and keeps executing its stored path on its own
+        # timer. Re-publishing an identical/trivial path each cycle just
+        # resets pure_pursuit's "reached" flag and makes it re-log forever.
+        self.robot1_last_succeeded_goal = None
+        self.robot2_last_succeeded_goal = None
 
         self.robot1_last_failed_goal = None
         self.robot2_last_failed_goal = None
@@ -112,6 +137,19 @@ class AStarPlanner(Node):
             10
         )
 
+        # For metrics_logger's mean-planning-time metric.
+        self.robot1_planning_time_pub = self.create_publisher(
+            Float32,
+            '/robot1/planning_time_ms',
+            10
+        )
+
+        self.robot2_planning_time_pub = self.create_publisher(
+            Float32,
+            '/robot2/planning_time_ms',
+            10
+        )
+
 
         self.timer = self.create_timer(
             0.5,
@@ -167,6 +205,7 @@ class AStarPlanner(Node):
 
             # New goal
             self.robot1_last_failed_goal = None
+            self.robot1_last_succeeded_goal = None
 
     def robot2_goal_callback(self, msg):
 
@@ -189,6 +228,7 @@ class AStarPlanner(Node):
 
             # New goal
             self.robot2_last_failed_goal = None
+            self.robot2_last_succeeded_goal = None
 
 
     def plan_paths(self):
@@ -200,7 +240,10 @@ class AStarPlanner(Node):
         if (
             self.robot1_x is not None
             and self.robot1_current_goal is not None
+            and self.robot1_current_goal != self.robot1_last_succeeded_goal
         ):
+
+            plan_start = time.time()
 
             path = self.create_path(
                 self.robot1_x,
@@ -208,7 +251,15 @@ class AStarPlanner(Node):
                 self.robot1_current_goal
             )
 
+            planning_time_msg = Float32()
+            planning_time_msg.data = (time.time() - plan_start) * 1000.0
+            self.robot1_planning_time_pub.publish(planning_time_msg)
+
             if path is not None:
+
+                self.robot1_last_succeeded_goal = (
+                    self.robot1_current_goal
+                )
 
                 self.robot1_path_pub.publish(
                     path
@@ -225,6 +276,12 @@ class AStarPlanner(Node):
                         self.robot1_current_goal
                     )
 
+                    self.get_logger().warn(
+                        f'No A* path found to '
+                        f'({self.robot1_current_goal[0]:.2f}, '
+                        f'{self.robot1_current_goal[1]:.2f})'
+                    )
+
                     fail_msg = Bool()
                     fail_msg.data = True
 
@@ -235,7 +292,10 @@ class AStarPlanner(Node):
         if (
             self.robot2_x is not None
             and self.robot2_current_goal is not None
+            and self.robot2_current_goal != self.robot2_last_succeeded_goal
         ):
+
+            plan_start = time.time()
 
             path = self.create_path(
                 self.robot2_x,
@@ -243,7 +303,15 @@ class AStarPlanner(Node):
                 self.robot2_current_goal
             )
 
+            planning_time_msg = Float32()
+            planning_time_msg.data = (time.time() - plan_start) * 1000.0
+            self.robot2_planning_time_pub.publish(planning_time_msg)
+
             if path is not None:
+
+                self.robot2_last_succeeded_goal = (
+                    self.robot2_current_goal
+                )
 
                 self.robot2_path_pub.publish(
                     path
@@ -258,6 +326,12 @@ class AStarPlanner(Node):
 
                     self.robot2_last_failed_goal = (
                         self.robot2_current_goal
+                    )
+
+                    self.get_logger().warn(
+                        f'No A* path found to '
+                        f'({self.robot2_current_goal[0]:.2f}, '
+                        f'{self.robot2_current_goal[1]:.2f})'
                     )
 
                     fail_msg = Bool()
@@ -327,7 +401,18 @@ class AStarPlanner(Node):
 
             return None
 
-     
+        if start == goal_cell:
+
+            robot_to_goal_distance = math.sqrt(
+                (robot_x - goal_x) ** 2
+                + (robot_y - goal_y) ** 2
+            )
+
+            if robot_to_goal_distance > self.same_cell_snap_tolerance:
+
+                return None
+
+
         # RUN A*
 
         path_cells = self.a_star(
@@ -336,11 +421,6 @@ class AStarPlanner(Node):
         )
 
         if path_cells is None:
-
-            self.get_logger().warn(
-                f'No A* path found to '
-                f'({goal_x:.2f}, {goal_y:.2f})'
-            )
 
             return None
 
@@ -659,9 +739,9 @@ class AStarPlanner(Node):
                 # 1-100 = occupied
                 #
                 # Unknown is treated as unsafe.
-               
 
-                if value >50:
+
+                if value > 50 or value == -1:
 
                     return False
 

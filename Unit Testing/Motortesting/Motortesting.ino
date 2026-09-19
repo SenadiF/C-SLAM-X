@@ -1,7 +1,7 @@
 #define LEFT_IN1   2
 #define LEFT_IN2   15
-#define RIGHT_IN3  27
-#define RIGHT_IN4  14
+#define RIGHT_IN3  14
+#define RIGHT_IN4  27
 
 void forward()
 {

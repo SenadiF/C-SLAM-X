@@ -1,7 +1,8 @@
 map_merge:
   ros__parameters:
+    use_sim_time: true
     merging_rate: 4.0
-    discovery_rate: 0.1
+    discovery_rate: 0.05
     estimation_rate: 0.5
     estimation_confidence: 0.6
     robot_namespace: "robot"
@@ -12,10 +13,18 @@ map_merge:
     world_frame: map
     publish_tf: true
     known_init_poses: true
+
+    # map_merge.cpp's getInitPose() looks these up as flat parameters on
+    # ITS OWN node (not a separate node's parameter block - "/robot1/map_merge:"
+    # as a top-level YAML key targets a node that doesn't exist and is
+    # silently ignored). The exact name it queries is
+    # append(append(robot_name, "map_merge"), "init_pose_x") = the literal
+    # string "/robot1/map_merge/init_pose_x", so that's the key here.
     "/robot1/map_merge/init_pose_x": 0.0
     "/robot1/map_merge/init_pose_y": 0.0
     "/robot1/map_merge/init_pose_z": 0.0
     "/robot1/map_merge/init_pose_yaw": 0.0
+
     "/robot2/map_merge/init_pose_x": -2.0
     "/robot2/map_merge/init_pose_y": -1.5
     "/robot2/map_merge/init_pose_z": 0.0

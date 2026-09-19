@@ -1,0 +1,46 @@
+# ros_gz_bridge config for the BASELINE comparison stack
+# (multirobot_slam.py / robot_coordinator.py / robot_controller.py)
+# Uses plain /robot1/odom, /robot2/odom (not odom_sim) since this
+# baseline reads raw odometry directly, no EKF in the loop.
+
+- ros_topic_name: "/robot1/cmd_vel"
+  gz_topic_name: "/robot1/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/robot1/odom"
+  gz_topic_name: "/robot1/odom_sim"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/robot1/scan"
+  gz_topic_name: "/robot1/scan_sim"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/robot2/cmd_vel"
+  gz_topic_name: "/robot2/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/robot2/odom"
+  gz_topic_name: "/robot2/odom_sim"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/robot2/scan"
+  gz_topic_name: "/robot2/scan_sim"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS

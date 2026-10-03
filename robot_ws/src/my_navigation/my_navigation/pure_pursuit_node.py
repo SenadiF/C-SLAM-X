@@ -30,6 +30,11 @@ class PurePursuit(Node):
         # NEW - bootstrap gap-following parameters
         self.declare_parameter('bootstrap_speed', 0.12)
         self.declare_parameter('bootstrap_safe_distance_mm', 400)
+        # When false, a robot with no A* path just stays still instead of
+        # gap-following - it only ever moves along paths from the planner.
+        self.declare_parameter('bootstrap_enabled', True)
+        # Half-width of the forward cone checked for obstacles (degrees).
+        self.declare_parameter('front_cone_deg', 30.0)
 
         # If a robot spends this long pursuing the same goal without
         # reaching it (e.g. oscillating near an obstacle on the way),
@@ -48,6 +53,8 @@ class PurePursuit(Node):
         self.safe_distance = self.get_parameter('safe_distance').value
         self.bootstrap_speed = self.get_parameter('bootstrap_speed').value
         self.bootstrap_safe_distance_mm = self.get_parameter('bootstrap_safe_distance_mm').value
+        self.bootstrap_enabled = self.get_parameter('bootstrap_enabled').value
+        self.front_cone_deg = float(self.get_parameter('front_cone_deg').value)
 
         self.robot1_path = None
         self.robot1_x = None
@@ -80,6 +87,18 @@ class PurePursuit(Node):
         )
         self.robot2_odom_sub = self.create_subscription(
             Odometry, '/robot2/odometry/filtered', self.robot2_odom_callback, 10
+        )
+
+        # Fallback: on hardware, if the EKF isn't publishing, drive on raw
+        # wheel odometry instead of silently sending no commands at all.
+        # Only used while the EKF's output has been missing for over 1 s.
+        self.robot1_ekf_time = None
+        self.robot2_ekf_time = None
+        self.robot1_wheel_odom_sub = self.create_subscription(
+            Odometry, '/robot1/wheel_odom', self.robot1_wheel_odom_callback, 10
+        )
+        self.robot2_wheel_odom_sub = self.create_subscription(
+            Odometry, '/robot2/wheel_odom', self.robot2_wheel_odom_callback, 10
         )
 
         self.robot1_cmd_pub = self.create_publisher(Twist, '/robot1/cmd_vel', 10)
@@ -118,7 +137,9 @@ class PurePursuit(Node):
 
         self.timer = self.create_timer(0.1, self.control_loop)
 
-        self.get_logger().info('Pure Pursuit Active (with bootstrap gap-following).')
+        self.get_logger().info(
+            'Pure Pursuit Active (bootstrap gap-following '
+            + ('ON' if self.bootstrap_enabled else 'OFF - robots only follow A* paths') + ').')
 
     def robot1_path_callback(self, msg):
         if self.robot1_path is None and len(msg.poses) > 0:
@@ -139,11 +160,40 @@ class PurePursuit(Node):
         self.robot2_goal_abandoned = False
 
     def robot1_odom_callback(self, msg):
+        self.robot1_ekf_time = self.get_clock().now()
         self.robot1_x = msg.pose.pose.position.x
         self.robot1_y = msg.pose.pose.position.y
         self.robot1_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
 
     def robot2_odom_callback(self, msg):
+        self.robot2_ekf_time = self.get_clock().now()
+        self.robot2_x = msg.pose.pose.position.x
+        self.robot2_y = msg.pose.pose.position.y
+        self.robot2_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+
+    def ekf_is_fresh(self, ekf_time):
+        if ekf_time is None:
+            return False
+        return (self.get_clock().now() - ekf_time).nanoseconds < 1e9
+
+    def robot1_wheel_odom_callback(self, msg):
+        if self.ekf_is_fresh(self.robot1_ekf_time):
+            return
+        self.get_logger().warn(
+            'Robot 1: no EKF output on /robot1/odometry/filtered - driving on '
+            '/robot1/wheel_odom instead (is localization.launch.py running?)',
+            throttle_duration_sec=10.0)
+        self.robot1_x = msg.pose.pose.position.x
+        self.robot1_y = msg.pose.pose.position.y
+        self.robot1_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+
+    def robot2_wheel_odom_callback(self, msg):
+        if self.ekf_is_fresh(self.robot2_ekf_time):
+            return
+        self.get_logger().warn(
+            'Robot 2: no EKF output on /robot2/odometry/filtered - driving on '
+            '/robot2/wheel_odom instead (is localization.launch.py running?)',
+            throttle_duration_sec=10.0)
         self.robot2_x = msg.pose.pose.position.x
         self.robot2_y = msg.pose.pose.position.y
         self.robot2_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
@@ -157,6 +207,17 @@ class PurePursuit(Node):
     def control_loop(self):
 
         # ---- ROBOT 1 ----
+        if self.robot1_x is None:
+            self.get_logger().warn(
+                'Robot 1 NOT driving: no odometry on /robot1/odometry/filtered '
+                'or /robot1/wheel_odom (is wheel_odometry_node running?)',
+                throttle_duration_sec=5.0)
+        elif self.robot1_scan is None:
+            self.get_logger().warn(
+                'Robot 1: no LiDAR on /robot1/scan - bootstrap and obstacle '
+                'avoidance are blind (is time_node running?)',
+                throttle_duration_sec=5.0)
+
         if self.robot1_x is not None and self.robot1_y is not None and self.robot1_yaw is not None:
 
             if self.robot1_path is not None and len(self.robot1_path.poses) > 0:
@@ -181,12 +242,31 @@ class PurePursuit(Node):
                 # explores locally and builds enough map for A* to work.
                 if self.robot1_bootstrap_since is None:
                     self.robot1_bootstrap_since = self.get_clock().now()
-                    self.get_logger().info('Robot 1: no path yet, entering bootstrap gap-following.')
+                    if self.bootstrap_enabled:
+                        self.get_logger().info('Robot 1: no path yet, entering bootstrap gap-following.')
 
-                cmd1 = self.gap_follow(self.robot1_scan)
+                if self.bootstrap_enabled:
+                    cmd1 = self.gap_follow(self.robot1_scan)
+                else:
+                    cmd1 = Twist()
+                    self.get_logger().info(
+                        'Robot 1: holding still, waiting for a path from A* '
+                        '(bootstrap disabled).',
+                        throttle_duration_sec=10.0)
                 self.robot1_cmd_pub.publish(cmd1)
 
         # ---- ROBOT 2 ----
+        if self.robot2_x is None:
+            self.get_logger().warn(
+                'Robot 2 NOT driving: no odometry on /robot2/odometry/filtered '
+                'or /robot2/wheel_odom (is wheel_odometry_node running?)',
+                throttle_duration_sec=5.0)
+        elif self.robot2_scan is None:
+            self.get_logger().warn(
+                'Robot 2: no LiDAR on /robot2/scan - bootstrap and obstacle '
+                'avoidance are blind (is time_node running?)',
+                throttle_duration_sec=5.0)
+
         if self.robot2_x is not None and self.robot2_y is not None and self.robot2_yaw is not None:
 
             if self.robot2_path is not None and len(self.robot2_path.poses) > 0:
@@ -208,9 +288,17 @@ class PurePursuit(Node):
             else:
                 if self.robot2_bootstrap_since is None:
                     self.robot2_bootstrap_since = self.get_clock().now()
-                    self.get_logger().info('Robot 2: no path yet, entering bootstrap gap-following.')
+                    if self.bootstrap_enabled:
+                        self.get_logger().info('Robot 2: no path yet, entering bootstrap gap-following.')
 
-                cmd2 = self.gap_follow(self.robot2_scan)
+                if self.bootstrap_enabled:
+                    cmd2 = self.gap_follow(self.robot2_scan)
+                else:
+                    cmd2 = Twist()
+                    self.get_logger().info(
+                        'Robot 2: holding still, waiting for a path from A* '
+                        '(bootstrap disabled).',
+                        throttle_duration_sec=10.0)
                 self.robot2_cmd_pub.publish(cmd2)
 
     # ------------------------------------------------------------------
@@ -293,11 +381,12 @@ class PurePursuit(Node):
             if distance > scan.range_max:
                 continue
 
-            if angle >= math.radians(330) or angle <= math.radians(30):
+            cone = math.radians(self.front_cone_deg)
+            if angle >= 2.0 * math.pi - cone or angle <= cone:
                 front_ranges.append(distance)
-            elif math.radians(30) < angle <= math.radians(90):
+            elif cone < angle <= math.radians(90):
                 left_ranges.append(distance)
-            elif math.radians(270) <= angle < math.radians(330):
+            elif math.radians(270) <= angle < 2.0 * math.pi - cone:
                 right_ranges.append(distance)
 
         if not front_ranges:

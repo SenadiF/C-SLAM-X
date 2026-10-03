@@ -1,47 +1,99 @@
+### micro-ROS agent - must be running first, before either ESP32 boots ###
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+
+### PROPOSED STACK (your own frontier / A* / pure pursuit) - hardware ###
+# Run each of these in its own terminal, in this order. Wait a few seconds
+# after each before starting the next (matches the staggered timing the
+# launch-file versions use, to avoid lifecycle-manager races on slam_toolbox).
+
 ros2 run robot_odometry wheel_odometry_node --ros-args -p robot_name:=robot1
 ros2 run robot_odometry wheel_odometry_node --ros-args -p robot_name:=robot2
 ros2 launch robot_bringup static_tf.launch.py
+
+# Restamper: firmware zeroes every message's header.stamp (msg.header.stamp.sec = 0),
+# which breaks slam_toolbox/TF time-based lookups. This republishes
+# scan_raw->scan and imu_raw->imu with a real clock - MUST be running
+# before localization/slam below, since those consume /robotN/scan and
+# /robotN/imu, not the _raw topics directly.
 ros2 run robot_control time_node
 
 ros2 launch robot_localization_config localization.launch.py namespace:=robot1
 ros2 launch robot_localization_config localization.launch.py namespace:=robot2
 ros2 launch robot_localization_config slam.launch.py
-ros2 launch my_navigation map_merge.launch.py
+
+# known_init_poses:=true  -> like sim's merge_mode:=known (measure robot2's
+#   real offset from robot1 and edit my_navigation/config/map_merge_params.yaml
+#   to match before launching)
+# known_init_poses:=false -> like sim's merge_mode:=unknown (AKAZE feature
+#   matching, no measurement needed but can be unstable with little overlap)
+ros2 launch my_navigation map_merge.launch.py known_init_poses:=true
+
 ros2 run my_navigation frontier_explorer_node
-ros2 run my_navigation astar_node
-ros2 run my_navigation pure_pursuit_node
-ros2 run my_navigation cmd_vel_relay_node
+# Hardware safety settings (sim defaults are too aggressive on the real robots).
+# bootstrap_enabled:=false -> robots only move along A* paths, never wander.
+ros2 run my_navigation astar_node --ros-args -p obstacle_inflation_radius:=0.22
+ros2 run my_navigation pure_pursuit_node --ros-args -p bootstrap_enabled:=false -p front_cone_deg:=45.0 -p linear_speed:=0.25 -p max_angular_speed:=1.0 -p emergency_distance:=0.25 -p safe_distance:=0.45
+# OR start the whole proposed stack in one go (logs in /tmp/hw_logs, agent auto-restarts):
+#   ./scripts/hw_proposed_start.sh known      and stop with   ./scripts/hw_stop.sh
+# cmd_vel_relay_node is NOT needed here - it only relays robot1's cmd_vel
+# to a TwistStamped on a global /cmd_vel topic, for a different robot
+# platform than these ESP32s (which subscribe Twist directly). Leave it out.
 
-ros2 launch my_navigation map_merge.launch.py known_init_poses:=true   # like sim's merge_mode:=known
-ros2 launch my_navigation map_merge.launch.py known_init_poses:=false  # like sim's merge_mode:=unknown
+ros2 run rviz2 rviz2
 
-# third map-merge comparison method: skip map_merge.launch.py entirely and
-# run this instead (subscribes to /robot1/map + /robot2/map directly,
-# broadcasts a TF aligning them - like sim's merge_mode:=ransac_icp)
-ros2 run my_navigation ransac_icp_map_aligner
+# Save the merged map once you've explored enough (leave everything running):
+ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03/hw_proposed_map
+
+### stop everything for the proposed stack before starting the baseline ###
+# pkill -9 -f micro_ros_agent; pkill -9 -f wheel_odometry_node; pkill -9 -f time_node
+# pkill -9 -f ekf_node; pkill -9 -f slam_toolbox; pkill -9 -f lifecycle_manager
+# pkill -9 -f map_merge; pkill -9 -f frontier_explorer; pkill -9 -f astar_node
+# pkill -9 -f pure_pursuit; pkill -9 -f static_transform_publisher; pkill -9 -f rviz2
 
 
+### BASELINE STACK (ss: multirobot_slam / robot_coordinator / robot_controller) ###
+# ss hardcodes /robotN/scan and /robotN/odom (not scan_raw/wheel_odom), so:
+#  - time_node (above) already gives it /robotN/scan for free, run it first.
+#  - /robotN/odom needs an explicit remap to wheel_odometry_node's real
+#    output topic, /robotN/wheel_odom, on every ss command below.
+#  - robot_controller's node name is NOT parameterized by robot_name (it's
+#    always 'robot_controller' internally), so the two instances need
+#    __node: set explicitly too, or the second one refuses to start
+#    (duplicate node name) instead of silently colliding.
+
+ros2 run robot_odometry wheel_odometry_node --ros-args -p robot_name:=robot1
+ros2 run robot_odometry wheel_odometry_node --ros-args -p robot_name:=robot2
+ros2 run robot_control time_node
+
+ros2 run ss multirobot_slam_node --ros-args -r /robot1/odom:=/robot1/wheel_odom -r /robot2/odom:=/robot2/wheel_odom
+ros2 run ss robot_coordinator_node --ros-args -r /robot1/odom:=/robot1/wheel_odom -r /robot2/odom:=/robot2/wheel_odom
+ros2 run ss robot_controller_node --ros-args -p robot_name:=robot1 -r __node:=robot_controller_robot1 -r /robot1/odom:=/robot1/wheel_odom
+ros2 run ss robot_controller_node --ros-args -p robot_name:=robot2 -r __node:=robot_controller_robot2 -r /robot2/odom:=/robot2/wheel_odom
+
+# ss/frames.py's SPAWN_POSES must match wherever you actually place the two
+# robots (position AND heading) - edit that file before running, same as
+# map_merge_params.yaml above for the proposed stack.
+
+ros2 run rviz2 rviz2
+
+ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03/hw_baseline_map
+
+### stop everything for the baseline stack ###
+# pkill -9 -f micro_ros_agent; pkill -9 -f wheel_odometry_node; pkill -9 -f time_node
+# pkill -9 -f multirobot_slam; pkill -9 -f robot_controller; pkill -9 -f robot_coordinator; pkill -9 -f rviz2
+
+
+### compare both saved maps against your ground truth ###
+# python3 scripts/compute_map_iou.py ~/ground_truth_map.yaml maps03/hw_proposed_map.yaml
+# python3 scripts/compute_map_iou.py ~/ground_truth_map.yaml maps03/hw_baseline_map.yaml
+
+
+### misc / debugging ###
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/robot1/cmd_vel
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/robot2/cmd_vel
 
-ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03
-
-
-ros2 run ss multirobot_slam_node
-ros2 run ss robot_controller_node
-ros2 run ss robot_coordinator_node
-
-
-map merger log checking  -  
-
+# map merge log checking
 ros2 run multirobot_map_merge map_merge --ros-args --log-level debug
-
-ros2 launch robot_localization_config nav2.launch.py
-ros2 run explore_lite explore --ros-args \
-  -r __ns:=/robot1 \
-  -p robot_base_frame:=robot1/base_link \
-  -p costmap_topic:=global_costmap/costmap \
-  -p costmap_updates_topic:=global_costmap/costmap_updates \
-  -p min_frontier_size:=0.5
 
 
 SIMULATION (Gazebo, two robots, no hardware needed) -

@@ -37,7 +37,7 @@ void setupRosCore() {
 
   allocator = rcl_get_default_allocator();
   rclc_support_init(&support, 0, NULL, &allocator);
-  rclc_node_init_default(&node, "imu_node", "robot1", &support);
+  rclc_node_init_default(&node, "imu_node", ROBOT_NAMESPACE, &support);
 
   rclc_publisher_init_default(
       &imu_publisher, &node,

@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan, Imu
 
 
@@ -27,7 +28,7 @@ class Restamper(Node):
             Imu,
             '/robot1/imu_raw',
             self.robot1_imu_callback,
-            10
+            qos_profile_sensor_data
         )
 
         self.robot1_imu_pub = self.create_publisher(
@@ -53,7 +54,7 @@ class Restamper(Node):
             Imu,
             '/robot2/imu_raw',
             self.robot2_imu_callback,
-            10
+            qos_profile_sensor_data
         )
 
         self.robot2_imu_pub = self.create_publisher(
@@ -63,7 +64,7 @@ class Restamper(Node):
         )
 
         self.get_logger().info(
-            'Restamper started for robot1 and robot2 (RELIABLE QoS)'
+            'Restamper started for robot1 and robot2 (scan RELIABLE, imu BEST_EFFORT)'
         )
 
     def robot1_scan_callback(self, msg):

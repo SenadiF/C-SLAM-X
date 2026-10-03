@@ -6,12 +6,12 @@
 void forward()
 {
   // Left motor forward
-  digitalWrite(LEFT_IN1,LOW);
-  digitalWrite(LEFT_IN2,HIGH);
+  digitalWrite(LEFT_IN1,HIGH);
+  digitalWrite(LEFT_IN2,LOW);
 
   // Right motor forward
-  digitalWrite(RIGHT_IN3,HIGH);
-  digitalWrite(RIGHT_IN4, LOW);
+  digitalWrite(RIGHT_IN3,LOW);
+  digitalWrite(RIGHT_IN4, HIGH);
 }
 
 void setup()

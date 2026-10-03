@@ -1,6 +1,7 @@
 import math
 
 import rclpy
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.node import Node
 
 from std_msgs.msg import Int32MultiArray
@@ -78,7 +79,7 @@ class WheelOdometryNode(Node):
             Int32MultiArray,
             encoder_topic,
             self.encoder_callback,
-            10
+            qos_profile_sensor_data  # firmware publishes encoders best-effort
         )
 
         self.odom_publisher = self.create_publisher(

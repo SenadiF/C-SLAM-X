@@ -56,6 +56,12 @@ def generate_launch_description():
                     parameters=[
                         {
                             'autostart': True,
+                            # slam_toolbox doesn't open a bond with the
+                            # lifecycle manager, so the default 4 s bond
+                            # check always times out, aborts bringup and
+                            # resets SLAM back to 'unconfigured' - no map,
+                            # no map->odom TF. 0.0 disables the bond check.
+                            'bond_timeout': 0.0,
                             'node_names': [
                                 'slam_toolbox'
                             ]
@@ -95,6 +101,12 @@ def generate_launch_description():
                     parameters=[
                         {
                             'autostart': True,
+                            # slam_toolbox doesn't open a bond with the
+                            # lifecycle manager, so the default 4 s bond
+                            # check always times out, aborts bringup and
+                            # resets SLAM back to 'unconfigured' - no map,
+                            # no map->odom TF. 0.0 disables the bond check.
+                            'bond_timeout': 0.0,
                             'node_names': [
                                 'slam_toolbox'
                             ]

@@ -16,7 +16,11 @@ setup(
         ['launch/robot.launch.py']),
 ('share/' + package_name + '/launch',
     ['launch/static_tf.launch.py']),
-   
+    ('share/' + package_name + '/launch',
+        ['launch/baseline_hw.launch.py']),
+    ('share/' + package_name + '/config',
+        ['config/map_merge_known.yaml']),
+
     ],
     install_requires=['setuptools'],
     zip_safe=True,

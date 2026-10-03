@@ -11,6 +11,15 @@
 #include <std_msgs/msg/int32_multi_array.h>
 #include <sensor_msgs/msg/laser_scan.h>
 
+// Which physical robot this board is. MUST be unique per board - if two
+// boards are both flashed with "robot1", they both end up on the same
+// /robot1/cmd_vel, /robot1/imu, etc. topics, so both react to any command
+// sent to either one (with a visible delay between them, since each board's
+// executor/WiFi timing differs) instead of just the intended robot moving.
+// Set this to "robot1" before flashing robot1's board, "robot2" before
+// flashing robot2's board.
+#define ROBOT_NAMESPACE "robot1"
+
 // WiFi / Agent config
 extern char* WIFI_SSID;
 extern char* WIFI_PASSWORD;

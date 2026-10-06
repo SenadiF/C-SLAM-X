@@ -1,0 +1,141 @@
+<?xml version="1.0"?>
+<!--
+  C-SLAM+ ESP32 robot (hardware). Two-layer chassis, LD19 on top.
+
+  Measured: 22 cm long x 15 cm wide, bottom plate 2.5 cm above the ground,
+  4 cm between the plates, LD19 3.5 cm tall on the top plate.
+
+  base_link is on the ground under the robot's rotation centre (midpoint
+  between the drive wheels). Assumed, adjust if different:
+    - wheels and LiDAR are centred along the length (x = 0)
+    - wheel diameter 65 mm, caster at the back
+    - wheel_separation matches wheel_odometry_node's wheel_base (0.099 m)
+
+  Link names are prefixed with robot_name (robot2/base_link, ...) to match
+  the existing TF tree, so RViz's RobotModel needs no TF prefix.
+-->
+<robot name="cslam_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="robot_name" default="robot2"/>
+  <xacro:property name="p" value="$(arg robot_name)/"/>
+
+  <xacro:property name="length" value="0.22"/>
+  <xacro:property name="width" value="0.15"/>
+  <xacro:property name="plate_thickness" value="0.003"/>
+  <xacro:property name="bottom_plate_z" value="0.025"/>
+  <xacro:property name="layer_gap" value="0.04"/>
+  <xacro:property name="top_plate_z" value="${bottom_plate_z + layer_gap}"/>
+  <xacro:property name="lidar_height" value="0.035"/>
+  <xacro:property name="lidar_radius" value="0.024"/>
+  <xacro:property name="lidar_x" value="0.0"/>
+  <xacro:property name="wheel_radius" value="0.0325"/>
+  <xacro:property name="wheel_width" value="0.025"/>
+  <xacro:property name="wheel_separation" value="0.099"/>
+  <xacro:property name="caster_radius" value="0.0125"/>
+  <xacro:property name="caster_x" value="-0.08"/>
+
+  <material name="plate"><color rgba="0.15 0.45 0.85 1"/></material>
+  <material name="standoff"><color rgba="0.8 0.8 0.8 1"/></material>
+  <material name="black"><color rgba="0.1 0.1 0.1 1"/></material>
+  <material name="lidar"><color rgba="0.2 0.2 0.2 1"/></material>
+
+  <link name="${p}base_link"/>
+
+  <!-- Two chassis plates -->
+  <xacro:macro name="plate" params="name z">
+    <link name="${p}${name}">
+      <visual>
+        <origin xyz="0 0 ${plate_thickness / 2}"/>
+        <geometry><box size="${length} ${width} ${plate_thickness}"/></geometry>
+        <material name="plate"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${plate_thickness / 2}"/>
+        <geometry><box size="${length} ${width} ${plate_thickness}"/></geometry>
+      </collision>
+    </link>
+    <joint name="${p}${name}_joint" type="fixed">
+      <parent link="${p}base_link"/>
+      <child link="${p}${name}"/>
+      <origin xyz="0 0 ${z}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:plate name="bottom_plate" z="${bottom_plate_z}"/>
+  <xacro:plate name="top_plate" z="${top_plate_z}"/>
+
+  <!-- Standoffs between the plates (visual only) -->
+  <xacro:macro name="standoff" params="name x y">
+    <link name="${p}${name}">
+      <visual>
+        <geometry><cylinder radius="0.003" length="${layer_gap}"/></geometry>
+        <material name="standoff"/>
+      </visual>
+    </link>
+    <joint name="${p}${name}_joint" type="fixed">
+      <parent link="${p}base_link"/>
+      <child link="${p}${name}"/>
+      <origin xyz="${x} ${y} ${bottom_plate_z + plate_thickness + layer_gap / 2}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:standoff name="standoff_fl" x="${length / 2 - 0.012}" y="${width / 2 - 0.012}"/>
+  <xacro:standoff name="standoff_fr" x="${length / 2 - 0.012}" y="${-(width / 2 - 0.012)}"/>
+  <xacro:standoff name="standoff_bl" x="${-(length / 2 - 0.012)}" y="${width / 2 - 0.012}"/>
+  <xacro:standoff name="standoff_br" x="${-(length / 2 - 0.012)}" y="${-(width / 2 - 0.012)}"/>
+
+  <!-- Drive wheels. Fixed joints: nothing publishes wheel joint states, and
+       a continuous joint without them would not be drawn. -->
+  <xacro:macro name="wheel" params="side y">
+    <link name="${p}${side}_wheel">
+      <visual>
+        <origin rpy="${pi / 2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+    <joint name="${p}${side}_wheel_joint" type="fixed">
+      <parent link="${p}base_link"/>
+      <child link="${p}${side}_wheel"/>
+      <origin xyz="0 ${y} ${wheel_radius}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel side="left" y="${wheel_separation / 2}"/>
+  <xacro:wheel side="right" y="${-wheel_separation / 2}"/>
+
+  <link name="${p}caster">
+    <visual>
+      <geometry><sphere radius="${caster_radius}"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="${p}caster_joint" type="fixed">
+    <parent link="${p}base_link"/>
+    <child link="${p}caster"/>
+    <origin xyz="${caster_x} 0 ${caster_radius}"/>
+  </joint>
+
+  <!-- LD19 on the top plate. lidar_link is at the middle of the unit,
+       roughly the scan plane. -->
+  <link name="${p}lidar_link">
+    <visual>
+      <geometry><cylinder radius="${lidar_radius}" length="${lidar_height}"/></geometry>
+      <material name="lidar"/>
+    </visual>
+  </link>
+  <joint name="${p}lidar_joint" type="fixed">
+    <parent link="${p}base_link"/>
+    <child link="${p}lidar_link"/>
+    <origin xyz="${lidar_x} 0 ${top_plate_z + plate_thickness + lidar_height / 2}"/>
+  </joint>
+
+  <!-- BMI160 between the plates -->
+  <link name="${p}imu_link"/>
+  <joint name="${p}imu_joint" type="fixed">
+    <parent link="${p}base_link"/>
+    <child link="${p}imu_link"/>
+    <origin xyz="0 0 ${bottom_plate_z + plate_thickness + layer_gap / 2}"/>
+  </joint>
+
+</robot>

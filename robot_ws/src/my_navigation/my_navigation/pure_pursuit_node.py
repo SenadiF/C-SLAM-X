@@ -3,6 +3,8 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
+from my_navigation.robot_pose import MapFramePose
+
 from nav_msgs.msg import Path
 from nav_msgs.msg import Odometry
 
@@ -18,6 +20,7 @@ class PurePursuit(Node):
     def __init__(self):
 
         super().__init__('pure_pursuit')
+        self.pose_tracker = MapFramePose(self)
 
         self.declare_parameter('lookahead_distance', 0.30)
         self.declare_parameter('linear_speed', 0.6)
@@ -26,6 +29,10 @@ class PurePursuit(Node):
         self.declare_parameter('minimum_linear_speed', 0.05)
         self.declare_parameter('emergency_distance', 0.15)
         self.declare_parameter('safe_distance', 0.30)
+        # Turn rate when an obstacle is inside emergency_distance. On the
+        # real robots 0.8 rad/s is only +-0.04 m/s per wheel - too little
+        # to rotate on the spot under load.
+        self.declare_parameter('avoidance_angular_speed', 0.8)
 
         # NEW - bootstrap gap-following parameters
         self.declare_parameter('bootstrap_speed', 0.12)
@@ -51,6 +58,7 @@ class PurePursuit(Node):
         self.minimum_linear_speed = self.get_parameter('minimum_linear_speed').value
         self.emergency_distance = self.get_parameter('emergency_distance').value
         self.safe_distance = self.get_parameter('safe_distance').value
+        self.avoidance_angular_speed = self.get_parameter('avoidance_angular_speed').value
         self.bootstrap_speed = self.get_parameter('bootstrap_speed').value
         self.bootstrap_safe_distance_mm = self.get_parameter('bootstrap_safe_distance_mm').value
         self.bootstrap_enabled = self.get_parameter('bootstrap_enabled').value
@@ -161,15 +169,11 @@ class PurePursuit(Node):
 
     def robot1_odom_callback(self, msg):
         self.robot1_ekf_time = self.get_clock().now()
-        self.robot1_x = msg.pose.pose.position.x
-        self.robot1_y = msg.pose.pose.position.y
-        self.robot1_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+        self.robot1_x, self.robot1_y, self.robot1_yaw = self.pose_tracker.get('robot1', msg)
 
     def robot2_odom_callback(self, msg):
         self.robot2_ekf_time = self.get_clock().now()
-        self.robot2_x = msg.pose.pose.position.x
-        self.robot2_y = msg.pose.pose.position.y
-        self.robot2_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+        self.robot2_x, self.robot2_y, self.robot2_yaw = self.pose_tracker.get('robot2', msg)
 
     def ekf_is_fresh(self, ekf_time):
         if ekf_time is None:
@@ -183,9 +187,7 @@ class PurePursuit(Node):
             'Robot 1: no EKF output on /robot1/odometry/filtered - driving on '
             '/robot1/wheel_odom instead (is localization.launch.py running?)',
             throttle_duration_sec=10.0)
-        self.robot1_x = msg.pose.pose.position.x
-        self.robot1_y = msg.pose.pose.position.y
-        self.robot1_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+        self.robot1_x, self.robot1_y, self.robot1_yaw = self.pose_tracker.get('robot1', msg)
 
     def robot2_wheel_odom_callback(self, msg):
         if self.ekf_is_fresh(self.robot2_ekf_time):
@@ -194,9 +196,7 @@ class PurePursuit(Node):
             'Robot 2: no EKF output on /robot2/odometry/filtered - driving on '
             '/robot2/wheel_odom instead (is localization.launch.py running?)',
             throttle_duration_sec=10.0)
-        self.robot2_x = msg.pose.pose.position.x
-        self.robot2_y = msg.pose.pose.position.y
-        self.robot2_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+        self.robot2_x, self.robot2_y, self.robot2_yaw = self.pose_tracker.get('robot2', msg)
 
     def robot1_scan_callback(self, msg):
         self.robot1_scan = msg
@@ -409,9 +409,9 @@ class PurePursuit(Node):
         else:
             cmd.linear.x = 0.05
         if direction == 'left':
-            cmd.angular.z = 0.8
+            cmd.angular.z = self.avoidance_angular_speed
         else:
-            cmd.angular.z = -0.8
+            cmd.angular.z = -self.avoidance_angular_speed
         return cmd
 
     def calculate_control(self, path, robot_x, robot_y, robot_yaw, robot_number):

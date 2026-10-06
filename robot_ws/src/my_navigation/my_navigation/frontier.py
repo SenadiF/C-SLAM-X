@@ -1,7 +1,11 @@
 import math
+from collections import deque
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
+
+from my_navigation.robot_pose import MapFramePose
 
 from nav_msgs.msg import OccupancyGrid
 from nav_msgs.msg import Odometry
@@ -17,6 +21,7 @@ class FrontierExplorer(Node):
     def __init__(self):
 
         super().__init__('frontier_explorer')
+        self.pose_tracker = MapFramePose(self)
 
         self.declare_parameter(
             'frontier_cluster_distance',
@@ -51,6 +56,22 @@ class FrontierExplorer(Node):
         self.obstacle_inflation_radius = self.get_parameter(
             'obstacle_inflation_radius'
         ).value
+
+        # Must match astar_planner's inflate_unknown (see there).
+        self.declare_parameter('inflate_unknown', True)
+        self.inflate_unknown = self.get_parameter('inflate_unknown').value
+
+        # 'centroid': one goal per frontier cluster, its center snapped to
+        # the nearest safe cell. 'reachable': goals are safe cells the
+        # robot can actually reach that touch a frontier, one per
+        # frontier_tile_size tile. On a real LiDAR map every ray's edges are
+        # frontier, so all frontier cells merge into one cluster whose
+        # center lies in unknown space - use 'reachable' on hardware.
+        self.declare_parameter('goal_selection', 'centroid')
+        self.goal_selection = self.get_parameter('goal_selection').value
+
+        self.declare_parameter('frontier_tile_size', 1.0)
+        self.frontier_tile_size = self.get_parameter('frontier_tile_size').value
 
         # Loop-closure corrections mean the map keeps subtly changing even
         # once real exploration is done, so "zero frontier cells left" is
@@ -176,23 +197,11 @@ class FrontierExplorer(Node):
 
     def robot1_odom_callback(self, msg):
 
-        self.robot1_x = (
-            msg.pose.pose.position.x
-        )
-
-        self.robot1_y = (
-            msg.pose.pose.position.y
-        )
+        self.robot1_x, self.robot1_y, _ = self.pose_tracker.get('robot1', msg)
 
     def robot2_odom_callback(self, msg):
 
-        self.robot2_x = (
-            msg.pose.pose.position.x
-        )
-
-        self.robot2_y = (
-            msg.pose.pose.position.y
-        )
+        self.robot2_x, self.robot2_y, _ = self.pose_tracker.get('robot2', msg)
 
     def robot1_goal_reached_callback(self, msg):
 
@@ -371,13 +380,23 @@ class FrontierExplorer(Node):
 
             return
 
+        if self.goal_selection == 'reachable':
+
+            frontier_points = self.reachable_frontier_goals(
+                frontier_cells
+            )
+
+            clusters = []
+
+        else:
+
+            frontier_points = []
+
 #Cluster
 
-        clusters = self.cluster_frontiers(
-            frontier_cells
-        )
-
-        frontier_points = []
+            clusters = self.cluster_frontiers(
+                frontier_cells
+            )
 
         for cluster in clusters:
 
@@ -681,7 +700,7 @@ class FrontierExplorer(Node):
 
                     value = data[ny * width + nx]
 
-                    if value > 50 or value == -1:
+                    if value > 50 or (value == -1 and self.inflate_unknown):
                         return False
 
             return True
@@ -725,6 +744,130 @@ class FrontierExplorer(Node):
                         )
 
         return None
+
+    # REACHABLE FRONTIER GOALS (goal_selection == 'reachable')
+
+    def safe_grid(self):
+        """Cells astar_planner's is_free accepts, as a (height, width) bool array."""
+
+        info = self.map_msg.info
+        width, height = info.width, info.height
+
+        grid = np.array(self.map_msg.data, dtype=np.int16).reshape(height, width)
+
+        blocked = grid > 50
+
+        if self.inflate_unknown:
+            blocked |= grid == -1
+
+        r = int(math.ceil(self.obstacle_inflation_radius / info.resolution))
+
+        # Outside the map counts as blocked, like in is_free.
+        padded = np.pad(blocked, r, constant_values=True)
+        inflated = np.zeros_like(blocked)
+
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                if dx * dx + dy * dy <= r * r:
+                    inflated |= padded[r + dy:r + dy + height, r + dx:r + dx + width]
+
+        return (grid >= 0) & (grid <= 50) & ~inflated
+
+    def reachable_frontier_goals(self, frontier_cells):
+
+        info = self.map_msg.info
+        width, height = info.width, info.height
+        resolution = info.resolution
+        origin_x = info.origin.position.x
+        origin_y = info.origin.position.y
+
+        safe = self.safe_grid()
+
+        # Flood fill (8-connected, like A*) from each robot's start cell,
+        # chosen the same way as astar_planner's find_nearest_free.
+        reachable = np.zeros_like(safe)
+        queue = deque()
+
+        for rx, ry in (
+            (self.robot1_x, self.robot1_y),
+            (self.robot2_x, self.robot2_y),
+        ):
+
+            if rx is None:
+                continue
+
+            gx = int((rx - origin_x) / resolution)
+            gy = int((ry - origin_y) / resolution)
+
+            start = None
+
+            for radius in range(0, 15):
+                for dx in range(-radius, radius + 1):
+                    for dy in range(-radius, radius + 1):
+                        nx, ny = gx + dx, gy + dy
+                        if 0 <= nx < width and 0 <= ny < height and safe[ny, nx]:
+                            start = (nx, ny)
+                            break
+                    if start:
+                        break
+                if start:
+                    break
+
+            if start and not reachable[start[1], start[0]]:
+                reachable[start[1], start[0]] = True
+                queue.append(start)
+
+        while queue:
+
+            x, y = queue.popleft()
+
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    nx, ny = x + dx, y + dy
+                    if (
+                        0 <= nx < width and 0 <= ny < height
+                        and safe[ny, nx] and not reachable[ny, nx]
+                    ):
+                        reachable[ny, nx] = True
+                        queue.append((nx, ny))
+
+        # Reachable cells within 2 cells of a frontier cell.
+        frontier = np.zeros_like(safe)
+        for x, y in frontier_cells:
+            frontier[y, x] = True
+
+        near = np.zeros_like(safe)
+        padded = np.pad(frontier, 2)
+        for dy in range(-2, 3):
+            for dx in range(-2, 3):
+                near |= padded[2 + dy:2 + dy + height, 2 + dx:2 + dx + width]
+
+        ys, xs = np.nonzero(reachable & near)
+
+        # One goal per tile: the candidate nearest the tile's mean.
+        tile = max(1, int(self.frontier_tile_size / resolution))
+        tiles = {}
+
+        for x, y in zip(xs.tolist(), ys.tolist()):
+            tiles.setdefault((x // tile, y // tile), []).append((x, y))
+
+        goals = []
+
+        for cells in tiles.values():
+
+            if len(cells) < 3:
+                continue
+
+            mx = sum(c[0] for c in cells) / len(cells)
+            my = sum(c[1] for c in cells) / len(cells)
+            x, y = min(cells, key=lambda c: (c[0] - mx) ** 2 + (c[1] - my) ** 2)
+
+            goals.append((
+                origin_x + (x + 0.5) * resolution,
+                origin_y + (y + 0.5) * resolution,
+            ))
+
+        return goals
 
     # FIND FRONTIER CELLS
 

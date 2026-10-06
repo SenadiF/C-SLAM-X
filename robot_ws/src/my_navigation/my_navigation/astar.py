@@ -1,6 +1,10 @@
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+
+from my_navigation.robot_pose import MapFramePose
 
 from nav_msgs.msg import OccupancyGrid
 from nav_msgs.msg import Path
@@ -21,6 +25,7 @@ class AStarPlanner(Node):
     def __init__(self):
 
         super().__init__('astar_planner')
+        self.pose_tracker = MapFramePose(self)
 
         self.map_msg = None
 
@@ -34,6 +39,14 @@ class AStarPlanner(Node):
         self.obstacle_inflation_radius = self.get_parameter(
             'obstacle_inflation_radius'
         ).value
+
+        # True: unknown cells inside the inflation disc also make a cell
+        # unsafe. On a real LiDAR map the unknown gaps between rays then
+        # reject almost every cell, so on hardware set this False - only
+        # occupied cells are inflated, and the cell itself must still be
+        # known free. Must match frontier_explorer's inflate_unknown.
+        self.declare_parameter('inflate_unknown', True)
+        self.inflate_unknown = self.get_parameter('inflate_unknown').value
 
         # If a goal is unreachable (blocked/inflated), find_nearest_free can
         # snap both the robot's start cell AND the goal cell to the same
@@ -119,6 +132,16 @@ class AStarPlanner(Node):
             10
         )
 
+        # The inflated obstacles A* plans around, for RViz (Map display,
+        # color scheme "costmap"): 100 = wall, 99..60 = inflation band,
+        # 0 = free. Latched so RViz shows it as soon as it subscribes.
+        self.inflated_map_pub = self.create_publisher(
+            OccupancyGrid,
+            '/inflated_map',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        )
+        self.last_inflation_publish = 0.0
+
         self.robot2_path_pub = self.create_publisher(
             Path,
             '/robot2/planned_path',
@@ -172,16 +195,59 @@ class AStarPlanner(Node):
 
         self.map_msg = msg
 
+        # The merged map can arrive at 4 Hz; 1 Hz is plenty for display.
+        if time.time() - self.last_inflation_publish >= 1.0:
+            self.last_inflation_publish = time.time()
+            self.publish_inflated_map(msg)
+
+    def publish_inflated_map(self, msg):
+
+        info = msg.info
+        width, height = info.width, info.height
+
+        grid = np.array(msg.data, dtype=np.int16).reshape(height, width)
+
+        # Same sources as is_free.
+        source = grid > 50
+
+        if self.inflate_unknown:
+            source |= grid == -1
+
+        r = int(math.ceil(self.obstacle_inflation_radius / info.resolution))
+
+        cost = np.zeros((height, width), dtype=np.int16)
+        padded = np.pad(source, r)
+
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+
+                distance = math.sqrt(dx * dx + dy * dy)
+
+                if distance > r:
+                    continue
+
+                # 99 next to the wall fading to 60 at the inflation edge.
+                value = int(round(99 - 39 * distance / max(r, 1)))
+                shifted = padded[r + dy:r + dy + height, r + dx:r + dx + width]
+                np.maximum(cost, np.where(shifted, value, 0), out=cost)
+
+        cost[grid > 50] = 100
+
+        out = OccupancyGrid()
+        out.header = msg.header
+        out.info = info
+        out.data = cost.ravel().astype(np.int8).tolist()
+
+        self.inflated_map_pub.publish(out)
+
     def robot1_odom_callback(self, msg):
 
-        self.robot1_x = msg.pose.pose.position.x
-        self.robot1_y = msg.pose.pose.position.y
+        self.robot1_x, self.robot1_y, _ = self.pose_tracker.get('robot1', msg)
 
 
     def robot2_odom_callback(self, msg):
 
-        self.robot2_x = msg.pose.pose.position.x
-        self.robot2_y = msg.pose.pose.position.y
+        self.robot2_x, self.robot2_y, _ = self.pose_tracker.get('robot2', msg)
 
 
     def robot1_goal_callback(self, msg):
@@ -689,6 +755,13 @@ class AStarPlanner(Node):
             )
         )
 
+        # The cell itself must be known free, even when unknown
+        # neighbours are allowed.
+        center = data[y * width + x]
+
+        if center > 50 or center == -1:
+            return False
+
         for dx in range(
             -inflation_cells,
             inflation_cells + 1
@@ -738,10 +811,11 @@ class AStarPlanner(Node):
                 # -1    = unknown
                 # 1-100 = occupied
                 #
-                # Unknown is treated as unsafe.
+                # Unknown is treated as unsafe unless inflate_unknown
+                # is False.
 
 
-                if value > 50 or value == -1:
+                if value > 50 or (value == -1 and self.inflate_unknown):
 
                     return False
 

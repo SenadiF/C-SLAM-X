@@ -80,6 +80,31 @@ const uint16_t AGENT_PORT = 8888;
 #define IMU_ADDRESS 0x69
 BMI160 IMU;
 calData calib = {0};
+
+// Gyro zero-rate offset (deg/s), measured at boot. Uncorrected, robot2's
+// gyro read +0.0044 rad/s standing still; the EKF trusts the gyro for yaw,
+// so the heading drifted ~15 deg/min and SLAM's scans rotated (ghosting).
+float gyro_bias[3] = {0.0, 0.0, 0.0};
+
+// Average the gyro while the robot is still. Keep it untouched for ~2 s
+// after power-on.
+void calibrateGyroBias() {
+  const int samples = 400;
+  float sum[3] = {0.0, 0.0, 0.0};
+  GyroData g;
+  for (int i = 0; i < samples; i++) {
+    IMU.update();
+    IMU.getGyro(&g);
+    sum[0] += g.gyroX;
+    sum[1] += g.gyroY;
+    sum[2] += g.gyroZ;
+    delay(5);
+  }
+  for (int k = 0; k < 3; k++) {
+    gyro_bias[k] = sum[k] / samples;
+  }
+  Serial.printf("Gyro bias (deg/s): %.3f %.3f %.3f\n", gyro_bias[0], gyro_bias[1], gyro_bias[2]);
+}
 AccelData accelData;
 GyroData gyroData;
 
@@ -87,7 +112,7 @@ GyroData gyroData;
 #define LEFT_ENC_A 4
 #define LEFT_ENC_B 13
 #define RIGHT_ENC_A 32
-#define RIGHT_ENC_B 33
+#define RIGHT_ENC_B 35
 
 //Motor driver
 #define LEFT_MOTOR_IN1 2
@@ -95,8 +120,8 @@ GyroData gyroData;
 #define RIGHT_MOTOR_IN1 14
 #define RIGHT_MOTOR_IN2 27
 
-#define LEFT_MOTOR_REVERSED  true
-#define RIGHT_MOTOR_REVERSED false
+#define LEFT_MOTOR_REVERSED  false
+#define RIGHT_MOTOR_REVERSED true
 
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
@@ -107,6 +132,12 @@ const float MAX_WHEEL_SPEED_MS = 0.6;
 LidarParserSTL lidar;
 HardwareSerial LidarSerial(2);
 uint16_t lidarDistances[360] = {0};
+// millis() when each angle was last measured. A reading older than
+// LIDAR_MAX_AGE_MS is published as "no return": it was taken from where the
+// robot used to be, and SLAM would map it as a ghost wall. The LD19 sweeps
+// every ~100 ms, so 250 ms keeps a full rotation even if one sweep is late.
+unsigned long lidarStamps[360] = {0};
+const unsigned long LIDAR_MAX_AGE_MS = 250;
 
 rcl_publisher_t scan_publisher;         
 sensor_msgs__msg__LaserScan scan_msg;  
@@ -157,16 +188,21 @@ void stopMotors() {
   ledcWrite(RIGHT_MOTOR_IN2, 0);
 }
 
+// Lowest PWM that still turns the wheels on the floor. Turning on the spot
+// (wheels in opposite directions) loads the motors much more than driving
+// straight, so it gets a higher floor - at 150 the robot barely rotated.
+const int MIN_DUTY = 180;
+const int MIN_TURN_DUTY = 220;
+
 // duty is signed: positive = forward, range -255..255.
-void driveMotorDuty(int pinForward, int pinBackward, float duty, bool reversed) {
+void driveMotorDuty(int pinForward, int pinBackward, float duty, bool reversed, int min_duty) {
   if (reversed)
     duty = -duty;
 
   int d = (int)fabs(duty);
   d = constrain(d, 0, 255);
-  const int MIN_DUTY = 150; 
-  if (d > 0 && d < MIN_DUTY) {
-    d = MIN_DUTY;
+  if (d > 0 && d < min_duty) {
+    d = min_duty;
   }
 
   if (duty >= 0) {
@@ -180,11 +216,12 @@ void driveMotorDuty(int pinForward, int pinBackward, float duty, bool reversed) 
 }
 
 void driveMotor(int pinForward, int pinBackward, float speed, bool reversed) {
-  driveMotorDuty(pinForward, pinBackward, speed / MAX_WHEEL_SPEED_MS * 255.0, reversed);
+  driveMotorDuty(pinForward, pinBackward, speed / MAX_WHEEL_SPEED_MS * 255.0, reversed, MIN_DUTY);
 }
 
 float wheelStep(WheelCtrl *w, float target, long ticks, float dt, unsigned long now) {
-  float measured = w->sign * (ticks - w->prev_ticks) / TICKS_PER_METER / dt;
+  long dticks = ticks - w->prev_ticks;
+  float measured = w->sign * dticks / TICKS_PER_METER / dt;
   w->prev_ticks = ticks;
   w->measured = measured;
 
@@ -195,11 +232,20 @@ float wheelStep(WheelCtrl *w, float target, long ticks, float dt, unsigned long 
     return 0.0;
   }
   if (!w->closed_loop) {
-    return feedforward;
+    if (dticks == 0) {
+      return feedforward;
+    }
+    // Ticks are back (e.g. it was only stalled) - resume speed control.
+    w->closed_loop = true;
+    w->bad_since = 0;
+    Serial.printf("[speed] %s encoder responding again - back to PI\n", w->label);
   }
 
   bool wrong_direction = (measured * target < 0.0) && fabs(measured) > 0.05;
-  bool not_moving = fabs(measured) < 0.02;
+  // Only zero ticks counts as a dead encoder. A slow or stalled wheel under
+  // load still ticks a little, and must stay closed-loop so the PI can
+  // raise its PWM - giving up on it left it stuck at the minimum duty.
+  bool not_moving = (dticks == 0);
   if (wrong_direction || not_moving) {
     if (w->bad_since == 0) {
       w->bad_since = now;
@@ -249,8 +295,9 @@ void updateSpeedControl() {
   if (target_left_speed == 0.0 && target_right_speed == 0.0) {
     stopMotors();
   } else {
-    driveMotorDuty(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_duty, LEFT_MOTOR_REVERSED);
-    driveMotorDuty(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_duty, RIGHT_MOTOR_REVERSED);
+    int min_duty = (target_left_speed * target_right_speed < 0.0) ? MIN_TURN_DUTY : MIN_DUTY;
+    driveMotorDuty(LEFT_MOTOR_IN1, LEFT_MOTOR_IN2, left_duty, LEFT_MOTOR_REVERSED, min_duty);
+    driveMotorDuty(RIGHT_MOTOR_IN1, RIGHT_MOTOR_IN2, right_duty, RIGHT_MOTOR_REVERSED, min_duty);
   }
 
 #if PID_DEBUG
@@ -310,9 +357,13 @@ void onLidarPoint(const LidarResultData& point, void* ref) {
   angleDeg = (360 - angleDeg) % 360;
 #endif
   lidarDistances[angleDeg] = (uint16_t)(point.distance * 1000.0f);
+  lidarStamps[angleDeg] = millis();
 }
 
 void setupLidar() {
+  // The LD19 streams ~23 KB/s; the default 256-byte buffer overflows (and
+  // loses points) whenever the loop blocks on Wi-Fi for more than ~10 ms.
+  LidarSerial.setRxBufferSize(4096);
   LidarSerial.begin(230400, SERIAL_8N1, 16, 17);
   lidar.setResultCallback(onLidarPoint);
   lidar.setAngleUnit(LidarAngleUnit::DEG);
@@ -337,10 +388,28 @@ void setupLidar() {
 
 }
 
+// readData() parses only ONE 12-point packet per call, and the LD19 sends
+// ~375 packets/s. Called once per loop() it kept ~2% of the points: the
+// rest overflowed the serial buffer, so scans were mostly seconds-old
+// readings (the ghost walls) or, once those expired, nearly empty.
+// Parse every complete packet waiting in the buffer. A packet is 47 bytes;
+// readData() drops a frame if bytes run out mid-way, so stop before that.
+const int LIDAR_PACKET_BYTES = 47;
+const int LIDAR_MAX_PACKETS_PER_DRAIN = 64;  // ~170 ms of data, bounds the time spent here
+
+void drainLidar() {
+  for (int i = 0; i < LIDAR_MAX_PACKETS_PER_DRAIN && LidarSerial.available() >= LIDAR_PACKET_BYTES; i++) {
+    lidar.readData(LidarSerial);
+  }
+}
+
 void publishScan(unsigned long current_time) {
+  drainLidar();  // freshest points into this scan
+  unsigned long now = millis();
   for (int i = 0; i < 360; i++) {
     // 0 = no reading; the STL also reports failed returns as ~65 m.
-    scan_msg.ranges.data[i] = (lidarDistances[i] == 0 || lidarDistances[i] > 12000)
+    bool stale = now - lidarStamps[i] > LIDAR_MAX_AGE_MS;
+    scan_msg.ranges.data[i] = (stale || lidarDistances[i] == 0 || lidarDistances[i] > 12000)
       ? INFINITY
       : lidarDistances[i] / 1000.0;
   }
@@ -380,6 +449,12 @@ bool createEntities() {
   RCCHECK_BOOL(rclc_publisher_init_best_effort(&imu_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu), "imu_raw"));
   RCCHECK_BOOL(rclc_publisher_init_best_effort(&encoder_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32MultiArray), "encoder"));
   RCCHECK_BOOL(rclc_publisher_init_default(&scan_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan), "scan_raw"));
+  // A reliable publish waits for the agent's ACK for up to
+  // RMW_UXRCE_PUBLISH_RELIABLE_TIMEOUT (1000 ms). On a lossy Wi-Fi link that
+  // stalled the whole loop for 0.7-2 s per scan, so IMU/encoders/scans all
+  // dropped to ~1 Hz and odometry and scans no longer lined up (ghosting).
+  // Wait at most 20 ms; unacknowledged fragments are resent on later spins.
+  RCCHECK_BOOL(rmw_uros_set_publisher_session_timeout(rcl_publisher_get_rmw_handle(&scan_publisher), 20));
   RCCHECK_BOOL(rclc_subscription_init_default(&cmd_vel_subscriber, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "cmd_vel"));
 
   executor = rclc_executor_get_zero_initialized_executor();
@@ -434,12 +509,18 @@ void setup()
         Serial.println("Continuing without IMU...");
     } else {
         Serial.println("BMI160 Initialized.");
+        calibrateGyroBias();
     }
 
     Serial.println("Connecting to Wi-Fi...");
     set_microros_wifi_transports(
         "Sena", "Devanga@123", "172.20.10.6", 8888
     );
+    // Wi-Fi power save (modem sleep, on by default) holds incoming packets
+    // until the next beacon: pings to this board took 6-209 ms (hotspot:
+    // 4 ms). The agent's ACKs arrived late, the reliable scan stream backed
+    // up, and every loop stalled ~1 s - sensors at 1 Hz, ghosted maps.
+    WiFi.setSleep(false);
     Serial.println("Wi-Fi connected.");
 
     dacDisable(LEFT_MOTOR_IN1); 
@@ -472,9 +553,9 @@ void publishSensors(unsigned long current_time)
         imu_msg.linear_acceleration.y = accelData.accelY * G_TO_MS2;
         imu_msg.linear_acceleration.z = accelData.accelZ * G_TO_MS2;
 
-        imu_msg.angular_velocity.x = gyroData.gyroX * DEG_TO_RAD;
-        imu_msg.angular_velocity.y = gyroData.gyroY * DEG_TO_RAD;
-        imu_msg.angular_velocity.z = gyroData.gyroZ * DEG_TO_RAD;
+        imu_msg.angular_velocity.x = (gyroData.gyroX - gyro_bias[0]) * DEG_TO_RAD;
+        imu_msg.angular_velocity.y = (gyroData.gyroY - gyro_bias[1]) * DEG_TO_RAD;
+        imu_msg.angular_velocity.z = (gyroData.gyroZ - gyro_bias[2]) * DEG_TO_RAD;
 
         imu_msg.header.stamp.sec = 0;
         imu_msg.header.stamp.nanosec = 0;
@@ -502,7 +583,7 @@ void publishSensors(unsigned long current_time)
 
 void loop()
 {
-    lidar.readData(LidarSerial);
+    drainLidar();
     unsigned long now = millis();
 
     switch (agent_state) {

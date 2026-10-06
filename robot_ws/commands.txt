@@ -109,3 +109,15 @@ ros2 launch multi_robot_sim multi_robot_sim.launch.py merge_mode:=known
 
 # ss baseline stack (multirobot_slam / robot_coordinator / robot_controller) - one launch does everything:
 ros2 launch multi_robot_sim baseline_sim.launch.py
+
+
+### SINGLE ROBOT (robot2 only) - hardware, proposed stack, no map merge ###
+# Validates frontier / A* / pure pursuit on one robot before running both.
+# Uses the robot's own SLAM map as /map (identity TF map -> robot2/map).
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+ros2 launch robot_bringup single_robot_hw.launch.py            # robot:=robot1 for the other one
+# RViz opens automatically (rviz/single_robot.rviz, rviz:=false to skip). Separately:
+#   ros2 run rviz2 rviz2 -d install/robot_bringup/share/robot_bringup/rviz/single_robot.rviz --ros-args -r __ns:=/robot2
+ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03/hw_single_robot2 --ros-args -r map:=/robot2/map
+# Live sensor health (rates, gaps, encoder movement, gyro offset, scan fill):
+python3 scripts/sensor_health.py robot2

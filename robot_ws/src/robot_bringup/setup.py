@@ -18,6 +18,12 @@ setup(
     ['launch/static_tf.launch.py']),
     ('share/' + package_name + '/launch',
         ['launch/baseline_hw.launch.py']),
+    ('share/' + package_name + '/launch',
+        ['launch/single_robot_hw.launch.py']),
+    ('share/' + package_name + '/rviz',
+        ['rviz/single_robot.rviz']),
+    ('share/' + package_name + '/urdf',
+        ['urdf/cslam_robot.urdf.xacro']),
     ('share/' + package_name + '/config',
         ['config/map_merge_known.yaml']),
 

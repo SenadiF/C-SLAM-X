@@ -800,10 +800,15 @@ bool createEntities() {
   RCCHECK_BOOL(rclc_publisher_init_best_effort(&imu_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu), "imu_raw"));
   RCCHECK_BOOL(rclc_publisher_init_best_effort(&encoder_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32MultiArray), "encoder"));
   RCCHECK_BOOL(rclc_publisher_init_default(&scan_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan), "scan_raw"));
-  // The scan publish keeps micro-ROS's default ACK wait. A 20 ms cap was
-  // tried while Wi-Fi power save delayed ACKs; with power save off (ACKs in
-  // ~8 ms) the cap left scans unacknowledged, the retry interval backed off
-  // to 1024 ms, and the executor spin stalled ~1 s per loop.
+  // Wait at most 20 ms for the agent to ACK a scan. With the default wait
+  // (up to RMW_UXRCE_PUBLISH_RELIABLE_TIMEOUT, 1000 ms) the scan publish
+  // took 250-900 ms per loop on a 25-200 ms link, so IMU/encoder/odometry
+  // dropped to 0.5-8 Hz and SLAM mapped scans between sparse poses
+  // (ghosting). Unacknowledged fragments are resent on later spins; if the
+  // link is slow a scan is dropped instead of freezing the loop. (A 20 ms
+  // cap failed once before only because micro-ROS's clock then moved in
+  // whole seconds - fixed by uros_clock_fix.)
+  RCCHECK_BOOL(rmw_uros_set_publisher_session_timeout(rcl_publisher_get_rmw_handle(&scan_publisher), 20));
   RCCHECK_BOOL(rclc_subscription_init_default(&cmd_vel_subscriber, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "cmd_vel"));
 
   executor = rclc_executor_get_zero_initialized_executor();

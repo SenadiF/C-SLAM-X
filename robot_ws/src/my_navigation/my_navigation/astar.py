@@ -20,6 +20,14 @@ import heapq
 import time
 
 
+# Goals and paths are sent once per goal. Latched (transient local) on both
+# ends, so a subscriber that connects late - DDS matching right after start-up,
+# or a restarted node - still gets the current goal/path. Volatile, a path
+# published before pure_pursuit had matched was lost and every node waited on
+# the others forever.
+LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+
+
 class AStarPlanner(Node):
 
     def __init__(self):
@@ -115,21 +123,21 @@ class AStarPlanner(Node):
             PoseArray,
             '/robot1/frontier_goals',
             self.robot1_goal_callback,
-            10
+            LATCHED
         )
 
         self.robot2_goal_sub = self.create_subscription(
             PoseArray,
             '/robot2/frontier_goals',
             self.robot2_goal_callback,
-            10
+            LATCHED
         )
 
 
         self.robot1_path_pub = self.create_publisher(
             Path,
             '/robot1/planned_path',
-            10
+            LATCHED
         )
 
         # The inflated obstacles A* plans around, for RViz (Map display,
@@ -145,7 +153,7 @@ class AStarPlanner(Node):
         self.robot2_path_pub = self.create_publisher(
             Path,
             '/robot2/planned_path',
-            10
+            LATCHED
         )
 
         self.robot1_planning_failed_pub = self.create_publisher(

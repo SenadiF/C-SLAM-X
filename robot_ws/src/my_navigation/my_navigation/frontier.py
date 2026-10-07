@@ -4,6 +4,7 @@ from collections import deque
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 
 from my_navigation.robot_pose import MapFramePose
 
@@ -14,6 +15,14 @@ from geometry_msgs.msg import PoseArray
 from geometry_msgs.msg import Pose
 
 from std_msgs.msg import Bool
+
+
+# Goals and paths are sent once per goal. Latched (transient local) on both
+# ends, so a subscriber that connects late - DDS matching right after start-up,
+# or a restarted node - still gets the current goal/path. Volatile, a path
+# published before pure_pursuit had matched was lost and every node waited on
+# the others forever.
+LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
 
 class FrontierExplorer(Node):
@@ -44,6 +53,16 @@ class FrontierExplorer(Node):
             'robot_goal_separation',
             0.60
         )
+
+        # Spread the robots out: a frontier within spread_radius (m) of the
+        # other robot or its goal costs spread_weight * (spread_radius - d)
+        # extra metres, and when both robots need a goal the pair is chosen
+        # together (select_goal_pair). 0 = off, the old nearest-frontier
+        # behaviour (kept as the default so simulation results compare).
+        self.declare_parameter('spread_radius', 0.0)
+        self.declare_parameter('spread_weight', 1.0)
+        self.spread_radius = self.get_parameter('spread_radius').value
+        self.spread_weight = self.get_parameter('spread_weight').value
 
         # Must match astar_planner's obstacle_inflation_radius - otherwise
         # this picks goals that are bare-free but still fall inside A*'s
@@ -144,13 +163,13 @@ class FrontierExplorer(Node):
         self.robot1_goal_pub = self.create_publisher(
             PoseArray,
             '/robot1/frontier_goals',
-            10
+            LATCHED
         )
 
         self.robot2_goal_pub = self.create_publisher(
             PoseArray,
             '/robot2/frontier_goals',
-            10
+            LATCHED
         )
 
         self.robot1_goal_reached_sub = self.create_subscription(
@@ -493,19 +512,29 @@ class FrontierExplorer(Node):
                 self.robot2_goals[0]
             )
 
+        need1 = self.robot1_x is not None and not self.robot1_goals
+        need2 = self.robot2_x is not None and not self.robot2_goals
+
+        # Both free (e.g. at the start): choose the two goals together.
+        pair = None
+        if need1 and need2 and self.spread_radius > 0.0:
+            pair = self.select_goal_pair(useful_frontiers, reserved)
+
 #Assign robot 1 frontiers
 
-        if (
-            self.robot1_x is not None
-            and not self.robot1_goals
-        ):
+        if need1:
 
-            robot1_frontier = (
+            # Stay away from robot 2 and where it is heading.
+            avoid1 = [(self.robot2_x, self.robot2_y)] if self.robot2_x is not None else []
+            avoid1 += self.robot2_goals[:1]
+
+            robot1_frontier = pair[0] if pair else (
                 self.select_frontier_for_robot(
                     useful_frontiers,
                     self.robot1_x,
                     self.robot1_y,
-                    reserved
+                    reserved,
+                    avoid1
                 )
             )
 
@@ -529,17 +558,19 @@ class FrontierExplorer(Node):
 
 #Assign robot 2 frontiers
 
-        if (
-            self.robot2_x is not None
-            and not self.robot2_goals
-        ):
+        if need2:
 
-            robot2_frontier = (
+            # Stay away from robot 1 and where it is heading.
+            avoid2 = [(self.robot1_x, self.robot1_y)] if self.robot1_x is not None else []
+            avoid2 += self.robot1_goals[:1]
+
+            robot2_frontier = pair[1] if pair else (
                 self.select_frontier_for_robot(
                     useful_frontiers,
                     self.robot2_x,
                     self.robot2_y,
-                    reserved
+                    reserved,
+                    avoid2
                 )
             )
 
@@ -563,8 +594,40 @@ class FrontierExplorer(Node):
         frontiers,
         robot_x,
         robot_y,
-        reserved
+        reserved,
+        avoid=()
     ):
+
+        candidates = self.frontier_candidates(
+            frontiers, robot_x, robot_y, reserved, avoid)
+
+        if not candidates:
+
+            return None
+
+        # Lowest cost first: distance, plus the spread penalty near the
+        # other robot.
+        candidates.sort(
+            key=lambda item: item[0]
+        )
+
+        return candidates[0][1]
+
+    def spread_penalty(self, frontier, avoid):
+        """Extra cost (m) for a frontier within spread_radius of `avoid`.
+
+        `avoid` holds the other robot's position and goal. Without it both
+        robots, starting close together, each took their nearest frontier
+        and explored the same area - the 0.6 m robot_goal_separation only
+        stops two goals from being on top of each other.
+        """
+        if self.spread_radius <= 0.0 or not avoid:
+            return 0.0
+        nearest = min(self.distance(frontier[0], frontier[1], a[0], a[1]) for a in avoid)
+        return self.spread_weight * max(0.0, self.spread_radius - nearest)
+
+    def frontier_candidates(self, frontiers, robot_x, robot_y, reserved, avoid=()):
+        """(cost, frontier) for every frontier this robot may be given."""
 
         candidates = []
 
@@ -607,22 +670,35 @@ class FrontierExplorer(Node):
 
                 candidates.append(
                     (
-                        distance,
+                        distance + self.spread_penalty(frontier, avoid),
                         frontier
                     )
                 )
 
-        if not candidates:
+        return candidates
 
-            return None
+    def select_goal_pair(self, frontiers, reserved):
+        """Goals for both robots at once, or None if no valid pair exists.
 
-        # Closest valid frontier first.
+        Picking robot1's best goal first and then robot2's left robot2 with
+        whatever was next to robot1's goal. Here every pair is scored
+        together: both travel distances plus the spread penalty between the
+        two goals, and the two goals must be robot_goal_separation apart.
+        """
+        c1 = self.frontier_candidates(frontiers, self.robot1_x, self.robot1_y, reserved)
+        c2 = self.frontier_candidates(frontiers, self.robot2_x, self.robot2_y, reserved)
 
-        candidates.sort(
-            key=lambda item: item[0]
-        )
+        best = None
+        for d1, f1 in c1:
+            for d2, f2 in c2:
+                apart = self.distance(f1[0], f1[1], f2[0], f2[1])
+                if apart < self.robot_goal_separation:
+                    continue
+                cost = d1 + d2 + self.spread_weight * max(0.0, self.spread_radius - apart)
+                if best is None or cost < best[0]:
+                    best = (cost, f1, f2)
 
-        return candidates[0][1]
+        return None if best is None else (best[1], best[2])
 
 #Check from the neighboring cells if the frontier is free and return the snapped point in world coordinates. If no free cell is found within a certain radius, return None.
 

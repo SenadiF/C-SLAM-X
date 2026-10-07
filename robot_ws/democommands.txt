@@ -1,0 +1,132 @@
+DEMO COMMANDS (branch demo1)
+============================
+Everything needed to run the demo: two real robots exploring together, one
+robot alone, and the Gazebo simulations. Run ROS commands from robot_ws/.
+
+Every new terminal first:
+  source /opt/ros/jazzy/setup.bash
+  source ~/Desktop/C-SLAM-X/microros_ws/install/local_setup.bash
+  cd ~/Desktop/C-SLAM-X/robot_ws && source install/setup.bash
+
+
+------------------------------------------------------------------------
+0. BUILD (once, or after changing code)
+------------------------------------------------------------------------
+colcon build --packages-select my_navigation robot_bringup robot_control robot_localization_config robot_odometry multi_robot_sim ss
+source install/setup.bash
+
+
+------------------------------------------------------------------------
+1. NETWORK (hardware only - check before every hardware demo)
+------------------------------------------------------------------------
+- 4G dongle plugged into the laptop by USB. Its WiFi is "Sena"; the robots
+  join it (firmware is pinned to the dongle's radio, MAC e4:7d:eb:82:54:79).
+- The laptop's USB connection has the static address 192.168.0.50 = the
+  agent IP in the firmware. Check:
+      ip -4 -br addr            # enx... interface must show 192.168.0.50
+  If it doesn't (one-time setup):
+      nmcli connection modify "Wired connection 2" ipv4.method manual ipv4.addresses 192.168.0.50/24 ipv4.gateway 192.168.0.1 ipv4.dns 192.168.0.1
+      nmcli connection up "Wired connection 2"
+- Keep the laptop's own WiFi OFF the dongle (else robot traffic goes over
+  the air twice and the robots lag/hit things):
+      nmcli device disconnect wlp0s20f3
+- Turn the phone hotspot off (it is also called "Sena", same channel).
+
+
+------------------------------------------------------------------------
+2. FIRMWARE (only if not flashed with this branch yet)
+------------------------------------------------------------------------
+Sketches: Unit Testing/IMU_microros/IMU_microros1 (robot1), .../IMU_microros2 (robot2)
+Needs the clock-fix library visible to the Arduino IDE (one-time):
+  ln -s ~/Desktop/C-SLAM-X/firmware_libs/uros_clock_fix ~/Arduino/libraries/uros_clock_fix
+Flash from the Arduino IDE (board: ESP32 Dev Module), or compile from CLI:
+  ~/Downloads/arduino-ide_2.3.10_Linux_64bit/resources/app/lib/backend/resources/arduino-cli compile --fqbn esp32:esp32:esp32 "Unit Testing/IMU_microros/IMU_microros1"
+After power-on/reset keep each robot STILL for ~8 s (gyro calibration).
+
+
+------------------------------------------------------------------------
+3. AGENT + CHECK THE ROBOTS (hardware)
+------------------------------------------------------------------------
+Terminal 1 - micro-ROS agent (keep running):
+  ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+
+Refresh the ROS CLI cache, then check both robots (Ctrl+C to stop):
+  ros2 daemon stop && ros2 daemon start
+  python3 scripts/sensor_health.py robot1
+  python3 scripts/sensor_health.py robot2
+Healthy: encoder/imu ~30 Hz, scan_raw ~10 Hz, gaps < 300 ms,
+gyro z ~0.000 while still, scan finite > 250/360, clock steps small (not 1000).
+
+
+------------------------------------------------------------------------
+4A. TWO ROBOTS - collaborative mapping (main demo)
+------------------------------------------------------------------------
+Measure robot2's start relative to robot1 (robot1 = "0 0 0"):
+  x = metres ahead of robot1, y = metres to robot1's LEFT (negative = right),
+  yaw = robot2 heading minus robot1 heading (radians).
+Start them ~0.6 m apart side by side, facing the same way, e.g. robot2 to
+robot1's right:
+
+  ros2 launch robot_bringup multi_robot_hw.launch.py robot1_pose:="0 0 0" robot2_pose:="0 -0.6 0"
+
+RViz opens by itself (merged map, inflation, both robots, scans, paths,
+goals). Navigation starts ~25 s after launch.
+
+Save the merged map when done (leave everything running):
+  ros2 run nav2_map_server map_saver_cli -f ~/Desktop/C-SLAM-X/robot_ws/maps03/demo_two_robot_map
+
+
+------------------------------------------------------------------------
+4B. ONE ROBOT - exploring alone
+------------------------------------------------------------------------
+  ros2 launch robot_bringup single_robot_hw.launch.py robot:=robot2     # or robot:=robot1
+
+Save its map:
+  ros2 run nav2_map_server map_saver_cli -f ~/Desktop/C-SLAM-X/robot_ws/maps03/demo_robot2_map --ros-args -r map:=/robot2/map
+
+
+------------------------------------------------------------------------
+5. SIMULATION (Gazebo, no hardware)
+------------------------------------------------------------------------
+Proposed stack (frontier / A* / pure pursuit), two robots, pick a merge:
+  ros2 launch multi_robot_sim multi_robot_sim.launch.py merge_mode:=known
+  ros2 launch multi_robot_sim multi_robot_sim.launch.py merge_mode:=unknown      # map_merge feature matching
+  ros2 launch multi_robot_sim multi_robot_sim.launch.py merge_mode:=ransac_icp   # own RANSAC+ICP aligner
+
+One robot:
+  ros2 launch multi_robot_sim single_robot_sim.launch.py
+
+Baseline stack (ss: multirobot_slam / robot_coordinator / robot_controller):
+  ros2 launch multi_robot_sim baseline_sim.launch.py
+
+Repeated trials + results (metrics CSVs, mean +- std, map IoU):
+  ./scripts/run_trials.sh multi_robot_sim multi_robot_sim.launch.py two_robot_known ~/comparison_results 5 90 merge_mode:=known
+  ./scripts/run_trials.sh multi_robot_sim baseline_sim.launch.py ss_reactive ~/comparison_results 5 90
+  python3 scripts/analyze_trials.py ~/comparison_results/*.csv
+  python3 scripts/compute_map_iou.py <ground_truth.yaml> <saved_map.yaml>
+
+
+------------------------------------------------------------------------
+6. STOP EVERYTHING (between runs - leftovers corrupt the next run)
+------------------------------------------------------------------------
+Ctrl+C the launch, then:
+  pkill -9 -f "ros2 launch"; pkill -9 -f wheel_odometry_node; pkill -9 -f time_node
+  pkill -9 -f ekf_node; pkill -9 -f slam_toolbox; pkill -9 -f lifecycle_manager
+  pkill -9 -f known_pose_merge; pkill -9 -f map_merge; pkill -9 -f frontier_explorer
+  pkill -9 -f astar_node; pkill -9 -f pure_pursuit; pkill -9 -f robot_state_publisher
+  pkill -9 -f static_transform_publisher; pkill -9 -f rviz2
+Simulation also:  pkill -9 -f "gz sim"; pkill -9 -f parameter_bridge
+(The agent can stay running between hardware runs.)
+
+
+------------------------------------------------------------------------
+7. IF SOMETHING GOES WRONG
+------------------------------------------------------------------------
+- Topics listed but robots don't move: ros2 daemon stop && ros2 daemon start,
+  then sensor_health.py. Rates ~0 = robot not reaching the agent: check
+  ip -4 -br addr shows 192.168.0.50 and the laptop WiFi is off the dongle.
+- Link quality:  ping -c 20 <robot ip>   (robot IPs: ip neigh | grep 192.168.0)
+  Want 0% loss and ~2-15 ms.
+- A robot drops out mid-run: check its battery first.
+- Ghosting: restart the launch for a fresh map (the merge keeps every wall
+  either robot ever saw).

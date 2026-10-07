@@ -11,7 +11,11 @@ C-SLAM+ is a two-robot collaborative SLAM system. Each robot is an ESP32 (differ
 - `robot_ws/` — main ROS 2 colcon workspace (all coordinator-side code). Run all `colcon`/`ros2` commands from here.
 - `microros_ws/` — micro-ROS agent build (`micro_ros_setup`); must be sourced for the agent.
 - `ldlidar_ros2_ws/` — vendor LD19 LiDAR driver.
-- `main_ino_copy_*/` — ESP32 Arduino firmware (modular: `RosComms`, `Encoders`, `ImuSensor`, `LidarReader`, `MotorControl`, `GapFollow`, `SdLogger`, `StateMachine`). Agent IP is hardcoded in `RosComms.cpp`; the robot namespace comes from `ROBOT_NAMESPACE`. This is a snapshot copy and may lag the firmware actually flashed.
+- `Unit Testing/IMU_microros/IMU_microros{1,2}/` — the ESP32 firmware actually flashed on robot1/robot2 (single-file sketches; only `ROBOT_NAME`/`CLIENT_KEY` and some pins should differ). `main_ino_copy_*/` is an older modular snapshot.
+  - Requires `firmware_libs/uros_clock_fix` (symlinked into `~/Arduino/libraries`): the precompiled micro_ros_arduino 2.0.8-jazzy reads `tv_nsec` at the wrong offset on ESP32 core 3.x (64-bit `time_t`), so micro-ROS's clock only advances in whole seconds and every loop/topic stalls to ~1 Hz. See its `extras/README.md`.
+  - Network: robots join the 4G dongle's WiFi "Sena" (pinned to its BSSID; the phone hotspot also uses that name). The dongle is plugged into the laptop by USB, and the laptop's USB connection ("Wired connection 2") has a static `192.168.0.50` = `AGENT_IP` in both sketches (DHCP reshuffled addresses and once gave the agent's address to a robot). Keep the laptop's own WiFi off the dongle, or robot traffic gets routed over the air twice.
+  - Compile from the CLI with the IDE's bundled `arduino-cli`: `~/Downloads/arduino-ide_2.3.10_Linux_64bit/resources/app/lib/backend/resources/arduino-cli compile --fqbn esp32:esp32:esp32 <sketch dir>`.
+  - `robot_ws/scripts/sensor_health.py robotN` shows live sensor rates plus firmware loop timings sent in the encoder message (indices ≥2; `wheel_odometry_node` only reads [0], [1]).
 - `Unit Testing/` — standalone Arduino sketches for individual sensors/motors.
 - `maps_1/`, `robot_ws/maps/` — saved occupancy maps (`.pgm` + `.yaml`) used for comparisons.
 - `Weekly_Progress/`, `Timeline.md` — progress notes, not code.
@@ -39,7 +43,9 @@ ros2 launch multi_robot_sim multi_robot_sim.launch.py merge_mode:=known   # or u
 ros2 launch multi_robot_sim baseline_sim.launch.py                         # ss baseline
 ```
 
-**Hardware:** micro-ROS agent first (`ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888`), then odometry → static TF → `time_node` → EKF ×2 → SLAM → map merge → navigation. Order and staggering matter (slam_toolbox lifecycle races). Shortcut: `robot_ws/scripts/hw_proposed_start.sh [known|unknown]` (logs in `/tmp/hw_logs`), stop with `hw_stop.sh`.
+**Hardware (current):** `ros2 launch robot_bringup single_robot_hw.launch.py robot:=robot2` or `multi_robot_hw.launch.py robot1_pose:="x y yaw" robot2_pose:="x y yaw"` (agent must already run). These carry the tuned hardware settings (URDF from `robot_bringup/urdf`, `inflate_unknown:=false`, `goal_selection:=reachable`, pure pursuit speeds) and open RViz with `robot_bringup/rviz/*.rviz`. The ROS 2 `map_merge` publishes no TF, so the multi launch publishes `map → robotN/map` from the same poses it gives map_merge and the nav nodes.
+
+**Hardware (older manual route):** micro-ROS agent first (`ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888`), then odometry → static TF → `time_node` → EKF ×2 → SLAM → map merge → navigation. Order and staggering matter (slam_toolbox lifecycle races). Shortcut: `robot_ws/scripts/hw_proposed_start.sh [known|unknown]` (logs in `/tmp/hw_logs`), stop with `hw_stop.sh`.
 
 **Experiments:**
 - `scripts/run_trials.sh <pkg> <launch> <strategy> <csv_dir> <N> <duration_s> [launch args]` — repeated sim trials with full process-group cleanup between runs; `metrics_logger` appends one CSV row per trial.

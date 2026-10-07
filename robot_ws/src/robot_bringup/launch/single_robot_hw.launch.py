@@ -158,6 +158,13 @@ def launch_setup(context):
                 'avoidance_angular_speed': 1.5,
                 'emergency_distance': 0.25,
                 'safe_distance': 0.45,
+                # Real speeds are ~0.1-0.3 m/s, so allow long paths; give up
+                # sooner when the robot is not moving at all (see
+                # pure_pursuit_node.goal_given_up).
+                'goal_pursuit_timeout': 60.0,
+                'stuck_timeout': 10.0,
+                # Hold still if a robot's scans stop arriving (bad Wi-Fi).
+                'scan_timeout': 0.5,
             }],
         ),
     ]

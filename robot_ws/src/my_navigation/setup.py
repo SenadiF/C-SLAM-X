@@ -36,6 +36,7 @@ entry_points={
 'cmd_vel_relay_node = my_navigation.cmd_vel_relay:main',
 'ransac_icp_map_aligner = my_navigation.ransac:main',
 'metrics_logger = my_navigation.metrics_logger:main',
+'known_pose_merge = my_navigation.known_pose_merge:main',
                 ],
     },
 )

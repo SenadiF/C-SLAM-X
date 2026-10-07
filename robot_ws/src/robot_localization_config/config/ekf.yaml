@@ -22,13 +22,19 @@ robot1:
 
       imu0: /robot1/imu
 
-      # Gyro yaw rate only. Integrating BMI160 accelerations (ax, ay) ran
-      # the filter away to kilometres whenever wheel odometry dropped out.
+      # Yaw from the heading the firmware integrates on the ESP32, fused as
+      # the change between consecutive messages (differential): rotation
+      # during dropped messages or Wi-Fi outages is still counted, and a
+      # firmware reboot (heading back to 0) causes no jump. The gyro *rate*
+      # is no longer fused - the EKF only saw the samples that arrived.
+      # (BMI160 accelerations are never fused: they ran the filter away to
+      # kilometres whenever wheel odometry dropped out.)
       imu0_config: [false, false, false,
-                    false, false, false,
-                    false, false, false,
                     false, false, true,
+                    false, false, false,
+                    false, false, false,
                     false, false, false]
+      imu0_differential: true
 
       imu0_remove_gravitational_acceleration: true
 
@@ -57,12 +63,18 @@ robot2:
 
       imu0: /robot2/imu
 
-      # Gyro yaw rate only. Integrating BMI160 accelerations (ax, ay) ran
-      # the filter away to kilometres whenever wheel odometry dropped out.
+      # Yaw from the heading the firmware integrates on the ESP32, fused as
+      # the change between consecutive messages (differential): rotation
+      # during dropped messages or Wi-Fi outages is still counted, and a
+      # firmware reboot (heading back to 0) causes no jump. The gyro *rate*
+      # is no longer fused - the EKF only saw the samples that arrived.
+      # (BMI160 accelerations are never fused: they ran the filter away to
+      # kilometres whenever wheel odometry dropped out.)
       imu0_config: [false, false, false,
-                    false, false, false,
-                    false, false, false,
                     false, false, true,
+                    false, false, false,
+                    false, false, false,
                     false, false, false]
+      imu0_differential: true
 
       imu0_remove_gravitational_acceleration: true

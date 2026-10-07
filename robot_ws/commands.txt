@@ -121,3 +121,18 @@ ros2 launch robot_bringup single_robot_hw.launch.py            # robot:=robot1 f
 ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03/hw_single_robot2 --ros-args -r map:=/robot2/map
 # Live sensor health (rates, gaps, encoder movement, gyro offset, scan fill):
 python3 scripts/sensor_health.py robot2
+
+
+### TWO ROBOTS (collaborative mapping) - hardware, proposed stack, known poses ###
+# Flash both ESP32s with Unit Testing/IMU_microros/IMU_microros{1,2} (needs
+# firmware_libs/uros_clock_fix in ~/Arduino/libraries). Keep each robot still
+# ~3 s after power-on (gyro calibration). Check both before launching:
+python3 scripts/sensor_health.py robot1
+python3 scripts/sensor_health.py robot2
+# robotN_pose = "x y yaw" of each robot's start. Easiest: robot1 "0 0 0", then
+# measure robot2 in robot1's frame (x = ahead of robot1, y = to robot1's left,
+# yaw = robot2's heading minus robot1's, radians). One pair of arguments sets
+# map_merge, the map->robotN/map TFs and the nav nodes together.
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+ros2 launch robot_bringup multi_robot_hw.launch.py robot1_pose:="0 0 0" robot2_pose:="-2.0 -1.5 0"
+ros2 run nav2_map_server map_saver_cli -f /home/senadi/Desktop/C-SLAM-X/robot_ws/maps03/hw_two_robot_map

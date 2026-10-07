@@ -2,6 +2,7 @@ import math
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 
 from my_navigation.robot_pose import MapFramePose
 
@@ -13,6 +14,14 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 
 from std_msgs.msg import Bool
+
+
+# Goals and paths are sent once per goal. Latched (transient local) on both
+# ends, so a subscriber that connects late - DDS matching right after start-up,
+# or a restarted node - still gets the current goal/path. Volatile, a path
+# published before pure_pursuit had matched was lost and every node waited on
+# the others forever.
+LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
 
 class PurePursuit(Node):
@@ -51,6 +60,23 @@ class PurePursuit(Node):
         self.declare_parameter('goal_pursuit_timeout', 25.0)
         self.goal_pursuit_timeout = self.get_parameter('goal_pursuit_timeout').value
 
+        # Also give up when the robot makes no progress: it has not moved
+        # stuck_distance (m) within stuck_timeout (s) - e.g. spinning in
+        # obstacle avoidance or wedged against something. 0 disables it.
+        self.declare_parameter('stuck_timeout', 0.0)
+        self.declare_parameter('stuck_distance', 0.10)
+        self.stuck_timeout = self.get_parameter('stuck_timeout').value
+        self.stuck_distance = self.get_parameter('stuck_distance').value
+        # robot number -> (x, y, time) where it last made progress
+        self.progress = {1: None, 2: None}
+
+        # Stop a robot whose latest scan is older than this (s): its obstacle
+        # check would be looking at the past. Over a bad Wi-Fi link scans came
+        # seconds late or not at all and the robots drove into things.
+        self.declare_parameter('scan_timeout', 1.0)
+        self.scan_timeout = self.get_parameter('scan_timeout').value
+        self.scan_time = {1: None, 2: None}
+
         self.lookahead_distance = self.get_parameter('lookahead_distance').value
         self.linear_speed = self.get_parameter('linear_speed').value
         self.max_angular_speed = self.get_parameter('max_angular_speed').value
@@ -79,10 +105,10 @@ class PurePursuit(Node):
         self.robot2_goal_reached = False
 
         self.robot1_path_sub = self.create_subscription(
-            Path, '/robot1/planned_path', self.robot1_path_callback, 10
+            Path, '/robot1/planned_path', self.robot1_path_callback, LATCHED
         )
         self.robot2_path_sub = self.create_subscription(
-            Path, '/robot2/planned_path', self.robot2_path_callback, 10
+            Path, '/robot2/planned_path', self.robot2_path_callback, LATCHED
         )
         self.robot1_scan_sub = self.create_subscription(
             LaserScan, '/robot1/scan', self.robot1_scan_callback, 10
@@ -157,6 +183,7 @@ class PurePursuit(Node):
         self.robot1_bootstrap_since = None
         self.robot1_goal_start_time = self.get_clock().now()
         self.robot1_goal_abandoned = False
+        self.progress[1] = None
 
     def robot2_path_callback(self, msg):
         if self.robot2_path is None and len(msg.poses) > 0:
@@ -166,6 +193,7 @@ class PurePursuit(Node):
         self.robot2_bootstrap_since = None
         self.robot2_goal_start_time = self.get_clock().now()
         self.robot2_goal_abandoned = False
+        self.progress[2] = None
 
     def robot1_odom_callback(self, msg):
         self.robot1_ekf_time = self.get_clock().now()
@@ -200,9 +228,26 @@ class PurePursuit(Node):
 
     def robot1_scan_callback(self, msg):
         self.robot1_scan = msg
+        self.scan_time[1] = self.get_clock().now()
 
     def robot2_scan_callback(self, msg):
         self.robot2_scan = msg
+        self.scan_time[2] = self.get_clock().now()
+
+    def scan_is_stale(self, robot_number):
+        """True if this robot's obstacle check has no recent scan to use."""
+        if self.scan_timeout <= 0.0:
+            return False
+        last = self.scan_time[robot_number]
+        if last is not None and (self.get_clock().now() - last).nanoseconds / 1e9 <= self.scan_timeout:
+            return False
+        self.get_logger().warn(
+            f'Robot {robot_number}: no LiDAR scan for over {self.scan_timeout:.1f}s - '
+            'holding still (driving blind would hit obstacles).',
+            throttle_duration_sec=5.0)
+        # A link outage is not being stuck: restart the no-progress timer.
+        self.progress[robot_number] = None
+        return True
 
     def control_loop(self):
 
@@ -224,7 +269,11 @@ class PurePursuit(Node):
 
                 obstacle, direction, obstacle_distance = self.detect_obstacle(self.robot1_scan)
 
-                if obstacle and obstacle_distance < self.emergency_distance:
+                if self.scan_is_stale(1):
+                    cmd1 = Twist()
+                elif self.goal_given_up(1, self.robot1_x, self.robot1_y):
+                    cmd1 = Twist()
+                elif obstacle and obstacle_distance < self.emergency_distance:
                     cmd1 = self.reactive_avoidance(direction, obstacle_distance)
                 else:
                     cmd1 = self.calculate_control(
@@ -273,7 +322,11 @@ class PurePursuit(Node):
 
                 obstacle, direction, obstacle_distance = self.detect_obstacle(self.robot2_scan)
 
-                if obstacle and obstacle_distance < self.emergency_distance:
+                if self.scan_is_stale(2):
+                    cmd2 = Twist()
+                elif self.goal_given_up(2, self.robot2_x, self.robot2_y):
+                    cmd2 = Twist()
+                elif obstacle and obstacle_distance < self.emergency_distance:
                     cmd2 = self.reactive_avoidance(direction, obstacle_distance)
                 else:
                     cmd2 = self.calculate_control(
@@ -414,46 +467,64 @@ class PurePursuit(Node):
             cmd.angular.z = -self.avoidance_angular_speed
         return cmd
 
+    def goal_given_up(self, robot_number, robot_x, robot_y):
+        """True once the robot has abandoned its current goal.
+
+        Checked every control cycle before obstacle avoidance - it used to
+        live in calculate_control(), which emergency avoidance skips, so a
+        robot spinning in front of an obstacle never timed out. On giving up
+        it publishes planning_failed once, so frontier_explorer assigns
+        another goal.
+        """
+        if robot_number == 1:
+            start = self.robot1_goal_start_time
+            abandoned = self.robot1_goal_abandoned
+            reached = self.robot1_goal_reached
+        else:
+            start = self.robot2_goal_start_time
+            abandoned = self.robot2_goal_abandoned
+            reached = self.robot2_goal_reached
+
+        if abandoned:
+            return True
+        # A reached goal keeps its path while the robot waits for the next
+        # one; standing still there is not being stuck.
+        if start is None or reached:
+            return False
+
+        now = self.get_clock().now()
+        elapsed = (now - start).nanoseconds / 1e9
+        reason = None
+
+        if elapsed > self.goal_pursuit_timeout:
+            reason = f'after {elapsed:.1f}s without reaching it'
+        elif self.stuck_timeout > 0.0:
+            last = self.progress[robot_number]
+            if last is None or self.distance(last[0], last[1], robot_x, robot_y) >= self.stuck_distance:
+                self.progress[robot_number] = (robot_x, robot_y, now)
+            elif (now - last[2]).nanoseconds / 1e9 > self.stuck_timeout:
+                reason = (f'stuck: moved less than {self.stuck_distance:.2f} m '
+                          f'in {self.stuck_timeout:.0f}s')
+
+        if reason is None:
+            return False
+
+        self.get_logger().warn(f'Robot {robot_number}: giving up on current goal {reason}.')
+        fail_msg = Bool()
+        fail_msg.data = True
+        if robot_number == 1:
+            self.robot1_goal_abandoned = True
+            self.robot1_planning_failed_pub.publish(fail_msg)
+        else:
+            self.robot2_goal_abandoned = True
+            self.robot2_planning_failed_pub.publish(fail_msg)
+        return True
+
     def calculate_control(self, path, robot_x, robot_y, robot_yaw, robot_number):
 
         cmd = Twist()
         if len(path.poses) == 0:
             return cmd
-
-        goal_start_time = (
-            self.robot1_goal_start_time if robot_number == 1
-            else self.robot2_goal_start_time
-        )
-
-        if goal_start_time is not None:
-
-            elapsed = (self.get_clock().now() - goal_start_time).nanoseconds / 1e9
-
-            if elapsed > self.goal_pursuit_timeout:
-
-                already_abandoned = (
-                    self.robot1_goal_abandoned if robot_number == 1
-                    else self.robot2_goal_abandoned
-                )
-
-                if not already_abandoned:
-
-                    self.get_logger().warn(
-                        f'Robot {robot_number}: giving up on current goal '
-                        f'after {elapsed:.1f}s without reaching it.'
-                    )
-
-                    fail_msg = Bool()
-                    fail_msg.data = True
-
-                    if robot_number == 1:
-                        self.robot1_goal_abandoned = True
-                        self.robot1_planning_failed_pub.publish(fail_msg)
-                    else:
-                        self.robot2_goal_abandoned = True
-                        self.robot2_planning_failed_pub.publish(fail_msg)
-
-                return cmd
 
         final_pose = path.poses[-1].pose
         goal_x = final_pose.position.x

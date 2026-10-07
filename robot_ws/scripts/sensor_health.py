@@ -19,6 +19,14 @@ What healthy looks like (firmware publishes IMU/encoder at 50 Hz, scan at 10 Hz)
   - encoder dL/dR both moving whenever the robot drives; one stuck at 0/1
     means that wheel's encoder channel is not counting.
   - scan finite readings well over 250 / 360.
+  - "firmware max ms" (newer firmware only): the slowest each loop step got.
+    A step near 1000 ms is what is holding the sensors at ~1 Hz.
+  - "encoder interrupts/s": while the wheels are still this should be ~0.
+    Thousands per second with the robot still means a noisy encoder A line
+    is flooding the CPU with interrupts.
+  - "clock": micro-ROS's clock must advance like Arduino's, in small steps.
+    Steps of exactly 1000 ms mean the uros_clock_fix library is not linked
+    (firmware_libs/uros_clock_fix/extras/README.md).
 """
 
 import math
@@ -34,6 +42,10 @@ from std_msgs.msg import Int32MultiArray
 
 WINDOW_S = 2.0
 
+# Order of the timing fields after [left, right] in the encoder message
+# (firmware enum T_LOOP .. T_SCAN).
+LOOP_STEPS = ('loop', 'drain', 'ping', 'spin', 'pid', 'scan')
+
 
 class SensorHealth(Node):
 
@@ -44,6 +56,10 @@ class SensorHealth(Node):
         self.encoders = []
         self.gyro_z = []
         self.scan_finite = []
+        self.loop_max = {}
+        self.isr_counts = []
+        self.read_stats = {}
+        self.clocks = []
 
         self.create_subscription(
             Int32MultiArray, f'/{robot}/encoder', self.encoder_cb, qos_profile_sensor_data)
@@ -56,6 +72,25 @@ class SensorHealth(Node):
     def encoder_cb(self, msg):
         self.times['encoder'].append(time.time())
         self.encoders.append((msg.data[0], msg.data[1]))
+        # Newer firmware appends the longest time (ms) each loop step took
+        # since the previous encoder message.
+        if len(msg.data) >= 2 + len(LOOP_STEPS):
+            for name, value in zip(LOOP_STEPS, msg.data[2:]):
+                self.loop_max[name] = max(self.loop_max.get(name, 0), value)
+        # ...and then the left/right encoder interrupt counts since boot.
+        if len(msg.data) >= 4 + len(LOOP_STEPS):
+            self.isr_counts.append(
+                (time.time(), msg.data[2 + len(LOOP_STEPS)], msg.data[3 + len(LOOP_STEPS)]))
+        # ...then micro-ROS transport reads: largest requested timeout (ms),
+        # longest read (ms), "wait forever" reads since boot.
+        if len(msg.data) >= 7 + len(LOOP_STEPS):
+            req, took, inf = msg.data[4 + len(LOOP_STEPS):7 + len(LOOP_STEPS)]
+            self.read_stats['req'] = max(self.read_stats.get('req', 0), req)
+            self.read_stats['took'] = max(self.read_stats.get('took', 0), took)
+            self.read_stats['inf'] = inf
+        # ...then uxr_millis() and millis(): micro-ROS's clock vs Arduino's.
+        if len(msg.data) >= 9 + len(LOOP_STEPS):
+            self.clocks.append(tuple(msg.data[7 + len(LOOP_STEPS):9 + len(LOOP_STEPS)]))
 
     def imu_cb(self, msg):
         self.times['imu_raw'].append(time.time())
@@ -84,6 +119,32 @@ class SensorHealth(Node):
 
         if self.scan_finite:
             line += f' | scan finite {min(self.scan_finite)}-{max(self.scan_finite)}/360'
+
+        if self.loop_max:
+            line += '\n    firmware max ms: ' + ' '.join(
+                f'{name}={self.loop_max.get(name, 0)}' for name in LOOP_STEPS)
+            self.loop_max.clear()
+
+        if len(self.isr_counts) >= 2:
+            (t0, l0, r0), (t1, l1, r1) = self.isr_counts[0], self.isr_counts[-1]
+            dt = max(t1 - t0, 1e-3)
+            line += (f' | encoder interrupts/s L={(l1 - l0) / dt:.0f} '
+                     f'R={(r1 - r0) / dt:.0f}')
+        # Keep the newest count so the next window has a starting point.
+        self.isr_counts = self.isr_counts[-1:]
+
+        if self.read_stats:
+            line += (f'\n    transport read: max requested {self.read_stats["req"]}ms, '
+                     f'longest {self.read_stats["took"]}ms, '
+                     f'wait-forever reads {self.read_stats["inf"]}')
+            self.read_stats.clear()
+
+        if len(self.clocks) >= 2:
+            (u0, m0), (u1, m1) = self.clocks[0], self.clocks[-1]
+            steps = sorted({b[0] - a[0] for a, b in zip(self.clocks, self.clocks[1:])})
+            line += (f'\n    clock: micro-ROS advanced {u1 - u0}ms vs Arduino {m1 - m0}ms '
+                     f'(micro-ROS step sizes seen: {steps[:4]})')
+        self.clocks = self.clocks[-1:]
 
         print(line, flush=True)
 
